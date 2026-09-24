@@ -38,6 +38,7 @@ interface CourseContextType {
   selectCourse: (courseId: string) => void;
   addCourse: (courseData: Omit<Course, 'id' | 'teacherId' | 'createdAt'>) => Course;
   updateCourse: (courseId: string, updates: Partial<Course>) => void;
+  updateAllCoursesInstitution: (institutionName: string) => Promise<void>;
   deleteCourse: (courseId: string) => Promise<void>;
 
   // Acciones Estudiantes
@@ -326,6 +327,26 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       console.warn('Error al actualizar curso en Firestore, encolado offline:', err);
       offlineStorage.addToSyncQueue({ action: 'update', collection: 'courses', data: { id: courseId, ...updatedPayload } });
     });
+  };
+
+  const updateAllCoursesInstitution = async (institutionName: string) => {
+    if (!currentUser?.uid || courses.length === 0) return;
+    const cleanInst = institutionName.trim();
+    if (!cleanInst) return;
+
+    setCourses(prev => prev.map(c => ({ ...c, institution: cleanInst })));
+    for (const c of courses) {
+      try {
+        await setFirestoreDoc('courses', c.id, { institution: cleanInst, updatedAt: new Date().toISOString() });
+      } catch (err) {
+        console.warn(`Error actualizando institución para curso ${c.id}:`, err);
+        offlineStorage.addToSyncQueue({
+          action: 'update',
+          collection: 'courses',
+          data: { id: c.id, institution: cleanInst }
+        });
+      }
+    }
   };
 
   const deleteCourse = async (courseId: string) => {
@@ -680,6 +701,7 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         selectCourse,
         addCourse,
         updateCourse,
+        updateAllCoursesInstitution,
         deleteCourse,
         addStudent,
         importStudents,

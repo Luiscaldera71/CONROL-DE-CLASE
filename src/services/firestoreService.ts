@@ -300,20 +300,38 @@ export const fetchStudentPortalData = async (student: Student): Promise<StudentP
 
   try {
     // 1. Obtener curso si existe
+    let teacherUid = (student as any).teacherId;
+
     if (student.courseId) {
       const courseDoc = await getDoc(doc(db, 'courses', student.courseId));
       if (courseDoc.exists()) {
         course = { id: courseDoc.id, ...courseDoc.data() } as Course;
-        
-        // Obtener profesor del curso
         if (course.teacherId) {
-          const teacherDoc = await getDoc(doc(db, 'teachers', course.teacherId));
-          if (teacherDoc.exists()) {
-            teacher = { uid: teacherDoc.id, ...teacherDoc.data() } as TeacherProfile;
-          }
+          teacherUid = course.teacherId;
         }
       }
+    }
 
+    // Obtener perfil del profesor
+    if (teacherUid) {
+      try {
+        const teacherDoc = await getDoc(doc(db, 'teachers', teacherUid));
+        if (teacherDoc.exists()) {
+          teacher = { uid: teacherDoc.id, ...teacherDoc.data() } as TeacherProfile;
+        }
+      } catch (tErr) {
+        console.warn('No se pudo cargar el perfil del docente en el portal:', tErr);
+      }
+    }
+
+    // Si el curso tiene institución por defecto o vacía pero el profesor tiene institución definida, sincronizar
+    if (course && teacher?.institution) {
+      if (!course.institution || course.institution === 'Colegio Integrado San Juan Bautista' || course.institution === 'Institución Educativa') {
+        course.institution = teacher.institution;
+      }
+    }
+
+    if (student.courseId) {
       // 2. Actividades del curso
       const actQuery = query(
         collection(db, 'activities'),

@@ -23,6 +23,8 @@ export interface TeacherProfile {
   email: string;
   displayName: string;
   institution: string;
+  subject?: string;         // e.g. "Tecnología e Informática", "Matemáticas"
+  phone?: string;
   createdAt: string;
   settings: TeacherSettings;
 }

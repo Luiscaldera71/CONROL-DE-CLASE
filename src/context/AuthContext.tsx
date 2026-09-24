@@ -45,6 +45,12 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   updateSettings: (newSettings: Partial<TeacherProfile['settings']>) => Promise<void>;
+  updateTeacherProfile: (updates: {
+    displayName?: string;
+    institution?: string;
+    subject?: string;
+    phone?: string;
+  }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -222,6 +228,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await saveTeacherProfileFirestore(updated);
   };
 
+  const updateTeacherProfile = async (updates: {
+    displayName?: string;
+    institution?: string;
+    subject?: string;
+    phone?: string;
+  }) => {
+    if (!teacherProfile || !currentUser?.uid) return;
+    const updated: TeacherProfile = {
+      ...teacherProfile,
+      ...updates
+    };
+    setTeacherProfile(updated);
+    offlineStorage.saveLocal('teacher_profile', updated);
+
+    if (updates.displayName && auth?.currentUser) {
+      try {
+        await updateProfile(auth.currentUser, { displayName: updates.displayName });
+        const updatedAuthUser = {
+          ...currentUser,
+          displayName: updates.displayName
+        };
+        setCurrentUser(updatedAuthUser);
+        offlineStorage.saveLocal('cached_auth_user', updatedAuthUser);
+      } catch (e) {
+        console.warn('Error al actualizar displayName en Auth:', e);
+      }
+    }
+
+    await saveTeacherProfileFirestore(updated);
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -235,7 +272,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         register,
         resetPassword,
         logout,
-        updateSettings
+        updateSettings,
+        updateTeacherProfile
       }}
     >
       {children}

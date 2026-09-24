@@ -1,22 +1,46 @@
-import React, { useState } from 'react';
-import { Layers, Plus, Check, Trash2, Edit2, Users, BookOpen, ChevronRight, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Layers, Plus, Check, Trash2, Edit2, Users, BookOpen, ChevronRight, X, School } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useCourse } from '../context/CourseContext';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { Course } from '../types';
 
 export const CoursesPage: React.FC = () => {
-  const { courses, activeCourse, selectCourse, addCourse, deleteCourse } = useCourse();
+  const { courses, activeCourse, selectCourse, addCourse, updateCourse, deleteCourse } = useCourse();
+  const { teacherProfile } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
 
+  // Modal de Crear Curso
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [name, setName] = useState('');
   const [gradeLevel, setGradeLevel] = useState('7°');
   const [group, setGroup] = useState('1');
-  const [subject, setSubject] = useState('Tecnología e Informática');
-  const [institution, setInstitution] = useState('Colegio Integrado San Juan Bautista');
+  const [subject, setSubject] = useState(teacherProfile?.subject || 'Tecnología e Informática');
+  const [institution, setInstitution] = useState(teacherProfile?.institution || '');
   const [shift, setShift] = useState('Mañana');
   const [currentPeriod, setCurrentPeriod] = useState('Periodo 1');
+
+  // Modal de Editar Curso
+  const [editingCourse, setEditingCourse] = useState<Course | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editGradeLevel, setEditGradeLevel] = useState('');
+  const [editGroup, setEditGroup] = useState('');
+  const [editSubject, setEditSubject] = useState('');
+  const [editInstitution, setEditInstitution] = useState('');
+  const [editShift, setEditShift] = useState('Mañana');
+  const [editCurrentPeriod, setEditCurrentPeriod] = useState('Periodo 1');
+
+  // Actualizar institución por defecto al abrir modal si cambió en el perfil
+  useEffect(() => {
+    if (teacherProfile?.institution && !institution) {
+      setInstitution(teacherProfile.institution);
+    }
+    if (teacherProfile?.subject && !subject) {
+      setSubject(teacherProfile.subject);
+    }
+  }, [teacherProfile]);
 
   const handleCreateCourse = (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,7 +51,7 @@ export const CoursesPage: React.FC = () => {
       gradeLevel,
       group,
       subject: subject.trim(),
-      institution: institution.trim(),
+      institution: institution.trim() || teacherProfile?.institution || 'Institución Educativa',
       shift,
       currentPeriod,
       academicYear: 2026
@@ -36,6 +60,35 @@ export const CoursesPage: React.FC = () => {
     showToast(`✓ Curso ${newCourse.name} creado exitosamente`, 'success');
     setName('');
     setIsModalOpen(false);
+  };
+
+  const handleOpenEdit = (course: Course) => {
+    setEditingCourse(course);
+    setEditName(course.name);
+    setEditGradeLevel(course.gradeLevel || '');
+    setEditGroup(course.group || '');
+    setEditSubject(course.subject || '');
+    setEditInstitution(course.institution || teacherProfile?.institution || '');
+    setEditShift(course.shift || 'Mañana');
+    setEditCurrentPeriod(course.currentPeriod || 'Periodo 1');
+  };
+
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCourse || !editName.trim()) return;
+
+    updateCourse(editingCourse.id, {
+      name: editName.trim(),
+      gradeLevel: editGradeLevel.trim(),
+      group: editGroup.trim(),
+      subject: editSubject.trim(),
+      institution: editInstitution.trim() || teacherProfile?.institution || 'Institución Educativa',
+      shift: editShift,
+      currentPeriod: editCurrentPeriod
+    });
+
+    showToast(`✓ Curso "${editName}" actualizado correctamente`, 'success');
+    setEditingCourse(null);
   };
 
   return (
@@ -53,7 +106,11 @@ export const CoursesPage: React.FC = () => {
         </div>
 
         <button
-          onClick={() => setIsModalOpen(true)}
+          onClick={() => {
+            setInstitution(teacherProfile?.institution || '');
+            setSubject(teacherProfile?.subject || 'Tecnología e Informática');
+            setIsModalOpen(true);
+          }}
           className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold shadow-touch active:scale-95 transition-all self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
@@ -81,16 +138,27 @@ export const CoursesPage: React.FC = () => {
                   <h3 className="font-bold text-base text-white">{course.name}</h3>
                 </div>
 
-                {isActive && (
-                  <span className="text-[10px] bg-brand-500/20 text-brand-300 font-bold px-2 py-0.5 rounded-full border border-brand-500/40">
-                    Activo
-                  </span>
-                )}
+                <div className="flex items-center gap-1">
+                  {isActive && (
+                    <span className="text-[10px] bg-brand-500/20 text-brand-300 font-bold px-2 py-0.5 rounded-full border border-brand-500/40">
+                      Activo
+                    </span>
+                  )}
+                  <button
+                    onClick={() => handleOpenEdit(course)}
+                    className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg transition-colors"
+                    title="Editar datos del curso"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-1 text-xs text-slate-400 mb-4">
                 <p className="font-medium text-slate-300">{course.subject}</p>
-                <p>{course.institution} • Jornada {course.shift}</p>
+                <p className="truncate text-slate-400">
+                  {course.institution} • Jornada {course.shift}
+                </p>
                 <div className="flex items-center gap-3 pt-1 text-[11px]">
                   <span className="bg-slate-800 px-2 py-0.5 rounded-md text-slate-300 font-semibold">
                     {course.studentCount || 0} estudiantes
@@ -211,7 +279,18 @@ export const CoursesPage: React.FC = () => {
                   type="text"
                   value={subject}
                   onChange={e => setSubject(e.target.value)}
-                  placeholder="Ej: Matemáticas o Tecnología"
+                  placeholder="Ej: Tecnología e Informática"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Institución Educativa</label>
+                <input
+                  type="text"
+                  value={institution}
+                  onChange={e => setInstitution(e.target.value)}
+                  placeholder="Ej: I.E. San José"
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
                 />
               </div>
@@ -227,10 +306,11 @@ export const CoursesPage: React.FC = () => {
                     <option value="Mañana">Mañana</option>
                     <option value="Tarde">Tarde</option>
                     <option value="Única">Única</option>
+                    <option value="Nocturna">Nocturna</option>
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-slate-300 font-semibold block mb-1">Periodo Inicial</label>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1">Periodo Actual</label>
                   <select
                     value={currentPeriod}
                     onChange={e => setCurrentPeriod(e.target.value)}
@@ -244,19 +324,133 @@ export const CoursesPage: React.FC = () => {
                 </div>
               </div>
 
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  className="w-full py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-bold text-sm shadow-touch transition-all active:scale-95"
+                >
+                  Crear Curso
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDITAR CURSO */}
+      {editingCourse && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 md:p-6 w-full max-w-md shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <Edit2 className="w-4 h-4 text-brand-400" />
+                <span>Editar Curso: {editingCourse.name}</span>
+              </h2>
+              <button onClick={() => setEditingCourse(null)} className="p-1.5 text-slate-400 hover:text-white rounded-full bg-slate-800">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Nombre del Curso *</label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  placeholder="Ej: 8°-2 o Grado Décimo"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1">Grado</label>
+                  <input
+                    type="text"
+                    value={editGradeLevel}
+                    onChange={e => setEditGradeLevel(e.target.value)}
+                    placeholder="8°"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1">Grupo</label>
+                  <input
+                    type="text"
+                    value={editGroup}
+                    onChange={e => setEditGroup(e.target.value)}
+                    placeholder="2"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Asignatura / Área</label>
+                <input
+                  type="text"
+                  value={editSubject}
+                  onChange={e => setEditSubject(e.target.value)}
+                  placeholder="Ej: Tecnología e Informática"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Institución Educativa</label>
+                <input
+                  type="text"
+                  value={editInstitution}
+                  onChange={e => setEditInstitution(e.target.value)}
+                  placeholder="Ej: I.E. San José"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1">Jornada</label>
+                  <select
+                    value={editShift}
+                    onChange={e => setEditShift(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+                  >
+                    <option value="Mañana">Mañana</option>
+                    <option value="Tarde">Tarde</option>
+                    <option value="Única">Única</option>
+                    <option value="Nocturna">Nocturna</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1">Periodo Actual</label>
+                  <select
+                    value={editCurrentPeriod}
+                    onChange={e => setEditCurrentPeriod(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+                  >
+                    <option value="Periodo 1">Periodo 1</option>
+                    <option value="Periodo 2">Periodo 2</option>
+                    <option value="Periodo 3">Periodo 3</option>
+                    <option value="Periodo 4">Periodo 4</option>
+                  </select>
+                </div>
+              </div>
+
               <div className="pt-2 flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold"
+                  onClick={() => setEditingCourse(null)}
+                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold text-sm transition-all"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold shadow-touch active:scale-95 transition-all"
+                  className="flex-1 py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-bold text-sm shadow-touch transition-all active:scale-95"
                 >
-                  Guardar Curso
+                  Guardar Cambios
                 </button>
               </div>
             </form>
@@ -266,3 +460,5 @@ export const CoursesPage: React.FC = () => {
     </div>
   );
 };
+
+export default CoursesPage;

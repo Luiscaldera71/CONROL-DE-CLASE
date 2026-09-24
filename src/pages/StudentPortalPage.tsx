@@ -370,7 +370,7 @@ export const StudentPortalPage: React.FC = () => {
                 </span>
               </div>
               <h1 className="text-sm font-bold text-slate-100 leading-tight">
-                {portalData?.course?.institution || 'Seguimiento Académico y Familiar'}
+                {portalData?.teacher?.institution || portalData?.course?.institution || 'Seguimiento Académico y Familiar'}
               </h1>
             </div>
           </div>
@@ -556,12 +556,8 @@ export const StudentPortalPage: React.FC = () => {
                     {portalData.student.documentNumber && (
                       <span>Doc: <strong className="text-slate-300">{portalData.student.documentNumber}</strong></span>
                     )}
-                    {portalData.teacher && (
-                      <span>Docente: <strong className="text-slate-300">{portalData.teacher.displayName}</strong></span>
-                    )}
-                    {portalData.course?.institution && (
-                      <span>Colegio: <strong className="text-slate-300">{portalData.course.institution}</strong></span>
-                    )}
+                    <span>Docente: <strong className="text-slate-300">{portalData.teacher?.displayName || 'Docente Titular'}</strong></span>
+                    <span>Colegio: <strong className="text-slate-300">{portalData.teacher?.institution || portalData.course?.institution || 'Institución Educativa'}</strong></span>
                   </div>
                 </div>
 
