@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AulaControl</string>
+    <string name="title_activity_main">AulaControl</string>
+    <string name="package_name">com.aulacontrol.app</string>
+    <string name="custom_url_scheme">com.aulacontrol.app</string>
+</resources>
