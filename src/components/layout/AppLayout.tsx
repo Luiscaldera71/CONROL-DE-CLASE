@@ -326,6 +326,16 @@ export const AppLayout: React.FC = () => {
             >
               <QrCode className="w-4 h-4" />
             </button>
+
+            {/* Direct Settings Shortcut in Header */}
+            <button
+              onClick={() => navigate('/settings')}
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 active:scale-95 transition-all flex items-center gap-1.5"
+              title="Configuración del Docente y Colegio"
+            >
+              <Settings className="w-4 h-4 text-brand-400" />
+              <span className="hidden lg:inline text-xs font-semibold">Configuración</span>
+            </button>
           </div>
         </header>
 
