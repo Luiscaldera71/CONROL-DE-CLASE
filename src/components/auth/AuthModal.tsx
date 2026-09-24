@@ -7,7 +7,8 @@ import {
   School,
   LogIn,
   UserPlus,
-  AlertCircle
+  AlertCircle,
+  BookOpen
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -21,6 +22,7 @@ export const AuthModal: React.FC = () => {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [institution, setInstitution] = useState('');
+  const [subject, setSubject] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -37,8 +39,15 @@ export const AuthModal: React.FC = () => {
         showToast('✓ Sesión iniciada con éxito en Firebase', 'success');
       } else {
         if (!name.trim()) throw new Error('Ingresa tu nombre completo');
+        if (!institution.trim()) throw new Error('Ingresa el nombre de tu institución educativa');
         if (password.length < 6) throw new Error('La contraseña debe tener al menos 6 caracteres');
-        await register(email.trim(), password, name.trim(), institution.trim() || 'Institución Educativa');
+        await register(
+          email.trim(),
+          password,
+          name.trim(),
+          institution.trim(),
+          subject.trim() || undefined
+        );
         showToast('✓ Cuenta de docente creada en Firebase', 'success');
       }
     } catch (err: any) {
@@ -133,14 +142,29 @@ export const AuthModal: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-[11px] font-semibold text-slate-300 block mb-1">Institución Educativa</label>
+                <label className="text-[11px] font-semibold text-slate-300 block mb-1">Institución Educativa *</label>
                 <div className="relative">
                   <School className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
                   <input
                     type="text"
-                    placeholder="I.E. República de Colombia"
+                    required
+                    placeholder="Ej: I.E. San José"
                     value={institution}
                     onChange={(e) => setInstitution(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-semibold text-slate-300 block mb-1">Área o Asignatura (Opcional)</label>
+                <div className="relative">
+                  <BookOpen className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    placeholder="Ej: Tecnología e Informática, Matemáticas..."
+                    value={subject}
+                    onChange={(e) => setSubject(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
                   />
                 </div>

@@ -41,7 +41,7 @@ interface AuthContextType {
   openAuthModal: () => void;
   closeAuthModal: () => void;
   login: (email: string, pass: string) => Promise<void>;
-  register: (email: string, pass: string, name: string, institution: string) => Promise<void>;
+  register: (email: string, pass: string, name: string, institution: string, subject?: string) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   updateSettings: (newSettings: Partial<TeacherProfile['settings']>) => Promise<void>;
@@ -163,7 +163,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsAuthModalOpen(false);
   };
 
-  const register = async (email: string, pass: string, name: string, institution: string) => {
+  const register = async (email: string, pass: string, name: string, institution: string, subject?: string) => {
     if (!auth) throw new Error('Firebase Auth no está disponible.');
     const cred = await createUserWithEmailAndPassword(auth, email.trim(), pass);
 
@@ -186,6 +186,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       email: email.trim(),
       displayName: name.trim(),
       institution: institution.trim() || 'Institución Educativa',
+      subject: subject?.trim() || undefined,
       createdAt: new Date().toISOString(),
       settings: DEFAULT_TEACHER_SETTINGS
     };

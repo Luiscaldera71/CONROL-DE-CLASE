@@ -15,7 +15,8 @@ import {
   KeyRound,
   ArrowLeft,
   ShieldCheck,
-  Database
+  Database,
+  BookOpen
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -30,6 +31,7 @@ export const AuthPage: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
   const [institution, setInstitution] = useState('');
+  const [subject, setSubject] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -50,6 +52,7 @@ export const AuthPage: React.FC = () => {
         showToast('✓ ¡Bienvenido de nuevo a AulaControl!', 'success');
       } else if (mode === 'register') {
         if (!name.trim()) throw new Error('Ingresa tu nombre completo');
+        if (!institution.trim()) throw new Error('Ingresa el nombre de tu colegio o institución educativa');
         if (!email.trim()) throw new Error('Ingresa tu correo electrónico');
         if (password.length < 6) throw new Error('La contraseña debe tener al menos 6 caracteres');
         if (password !== confirmPassword) throw new Error('Las contraseñas no coinciden');
@@ -58,7 +61,8 @@ export const AuthPage: React.FC = () => {
           email.trim(),
           password,
           name.trim(),
-          institution.trim() || 'Institución Educativa'
+          institution.trim(),
+          subject.trim() || undefined
         );
         showToast('✓ ¡Cuenta docente creada con éxito en Firebase!', 'success');
       } else if (mode === 'forgot') {
@@ -191,15 +195,32 @@ export const AuthPage: React.FC = () => {
 
                 <div>
                   <label className="text-xs font-semibold text-slate-300 block mb-1.5">
-                    Colegio o Institución Educativa
+                    Colegio o Institución Educativa *
                   </label>
                   <div className="relative">
                     <School className="w-4 h-4 text-slate-500 absolute left-3 top-3.5" />
                     <input
                       type="text"
-                      placeholder="Colegio San Martín"
+                      required
+                      placeholder="Ej: I.E. San José"
                       value={institution}
                       onChange={(e) => setInstitution(e.target.value)}
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-xl pl-9 pr-3 py-2.5 text-sm text-white focus:outline-none focus:border-brand-500 transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    Área o Asignatura Principal (Opcional)
+                  </label>
+                  <div className="relative">
+                    <BookOpen className="w-4 h-4 text-slate-500 absolute left-3 top-3.5" />
+                    <input
+                      type="text"
+                      placeholder="Ej: Tecnología e Informática, Matemáticas..."
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
                       className="w-full bg-slate-950/60 border border-slate-800 rounded-xl pl-9 pr-3 py-2.5 text-sm text-white focus:outline-none focus:border-brand-500 transition-colors"
                     />
                   </div>
