@@ -18,7 +18,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   enableDemoMode: () => void;
   updateSettings: (newSettings: Partial<TeacherProfile['settings']>) => Promise<void>;
-  updateProfile: (updates: Partial<TeacherProfile>) => Promise<void>;
+  updateProfile: (updates: Partial<Omit<TeacherProfile, 'settings'>> & { settings?: Partial<TeacherProfile['settings']> }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -180,7 +180,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const updateProfile = async (updates: Partial<TeacherProfile>) => {
+  const updateProfile = async (
+    updates: Partial<Omit<TeacherProfile, 'settings'>> & { settings?: Partial<TeacherProfile['settings']> }
+  ) => {
     if (!teacherProfile) return;
     const updated: TeacherProfile = {
       ...teacherProfile,

@@ -59,6 +59,7 @@ export const SettingsPage: React.FC = () => {
       displayName: displayName.trim(),
       institution: institution.trim(),
       settings: {
+        ...currentSettings,
         gradeScale: {
           min: 0.0,
           max: 5.0,
