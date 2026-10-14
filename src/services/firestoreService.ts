@@ -27,12 +27,39 @@ export const isFirestoreReady = (): boolean => {
   return Boolean(isFirebaseConfigured && db);
 };
 
+/**
+ * Elimina recursivamente todas las propiedades con valor `undefined` de un objeto o arreglo,
+ * ya que Firestore rechaza fatalmente cualquier campo con valor `undefined`.
+ */
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return data;
+  }
+
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeForFirestore(item)) as unknown as T;
+  }
+
+  if (typeof data === 'object' && !(data instanceof Date)) {
+    const cleaned: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        cleaned[key] = sanitizeForFirestore(value);
+      }
+    }
+    return cleaned as T;
+  }
+
+  return data;
+}
+
 // ================= PERFIL DE PROFESOR =================
 export const saveTeacherProfileFirestore = async (profile: TeacherProfile): Promise<void> => {
   if (!isFirestoreReady()) return;
   try {
     const docRef = doc(db, 'teachers', profile.uid);
-    await setDoc(docRef, profile, { merge: true });
+    const sanitized = sanitizeForFirestore(profile);
+    await setDoc(docRef, sanitized, { merge: true });
   } catch (error) {
     console.error('Error guardando perfil en Firestore:', error);
   }
@@ -87,7 +114,8 @@ export const setFirestoreDoc = async (
   if (!isFirestoreReady()) return;
   try {
     const docRef = doc(db, collectionName, id);
-    await setDoc(docRef, data, { merge: true });
+    const sanitized = sanitizeForFirestore(data);
+    await setDoc(docRef, sanitized, { merge: true });
   } catch (error) {
     console.error(`Error guardando en ${collectionName}/${id}:`, error);
     throw error;
@@ -114,7 +142,6 @@ export const batchSaveFirestore = async (
 ): Promise<void> => {
   if (!isFirestoreReady() || items.length === 0) return;
   try {
-    const batch = writeBatch(db);
     // Firestore permite hasta 500 operaciones por batch
     const chunks = [];
     for (let i = 0; i < items.length; i += 400) {
@@ -125,10 +152,12 @@ export const batchSaveFirestore = async (
       const b = writeBatch(db);
       for (const item of chunk) {
         const ref = doc(db, collectionName, item.id);
-        b.set(ref, item.data, { merge: true });
+        const sanitized = sanitizeForFirestore(item.data);
+        b.set(ref, sanitized, { merge: true });
       }
       await b.commit();
     }
+    console.log(`✓ Lote de ${items.length} documentos guardado en Firestore (${collectionName})`);
   } catch (error) {
     console.error(`Error en batchSaveFirestore para ${collectionName}:`, error);
     throw error;

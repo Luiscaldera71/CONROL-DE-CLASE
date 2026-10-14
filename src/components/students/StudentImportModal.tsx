@@ -9,7 +9,7 @@ interface StudentImportModalProps {
 }
 
 export const StudentImportModal: React.FC<StudentImportModalProps> = ({ onClose }) => {
-  const { importStudents, activeCourse } = useCourse();
+  const { importStudents, activeCourse, courses, selectCourse } = useCourse();
   const { showToast } = useToast();
 
   const [file, setFile] = useState<File | null>(null);
@@ -82,9 +82,26 @@ export const StudentImportModal: React.FC<StudentImportModalProps> = ({ onClose 
             </div>
             <div>
               <h2 className="text-base font-extrabold text-slate-900">Cargar Estudiantes desde Excel</h2>
-              <p className="text-xs text-slate-500 font-medium">
-                Curso activo: <strong className="text-slate-800">{activeCourse?.name || 'General'}</strong>
-              </p>
+              {courses.length > 1 ? (
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="text-xs text-slate-500 font-medium">Curso destino:</span>
+                  <select
+                    value={activeCourse?.id || ''}
+                    onChange={(e) => selectCourse(e.target.value)}
+                    className="text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    {courses.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.studentCount || 0} est.)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500 font-medium">
+                  Curso destino: <strong className="text-slate-800">{activeCourse?.name || 'General'}</strong>
+                </p>
+              )}
             </div>
           </div>
           <button

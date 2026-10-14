@@ -24,7 +24,7 @@ import { Student } from '../types';
 import { StudentImportModal } from '../components/students/StudentImportModal';
 
 export const StudentsPage: React.FC = () => {
-  const { students, activeCourse, addStudent, updateStudent, deleteStudent } = useCourse();
+  const { courses, selectCourse, students, activeCourse, addStudent, updateStudent, deleteStudent } = useCourse();
   const { showToast } = useToast();
   const navigate = useNavigate();
 
@@ -79,6 +79,34 @@ export const StudentsPage: React.FC = () => {
 
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
+      {/* SELECTOR RÁPIDO DE CURSOS SI TIENE MÚLTIPLES */}
+      {courses.length > 1 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1.5 pt-0.5 scrollbar-none">
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0 mr-1">
+            Cursos:
+          </span>
+          {courses.map(course => {
+            const isCur = course.id === activeCourse?.id;
+            return (
+              <button
+                key={course.id}
+                onClick={() => selectCourse(course.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shadow-xs ${
+                  isCur
+                    ? 'bg-blue-600 text-white shadow-blue-500/20'
+                    : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+                }`}
+              >
+                <span>{course.name}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${isCur ? 'bg-blue-700/70 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                  {course.studentCount || 0}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* ENCABEZADO Y ACCIONES PRINCIPALES (Estilo AbsenSiswa) */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>

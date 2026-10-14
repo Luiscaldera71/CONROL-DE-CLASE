@@ -231,7 +231,7 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Filtrar estudiantes por curso activo
   const activeStudents = students
-    .filter(s => s.courseId === activeCourse?.id && s.active)
+    .filter(s => s.courseId === activeCourse?.id && s.active !== false)
     .sort((a, b) => a.listNumber - b.listNumber);
 
   // Filtrar actividades por curso activo
@@ -303,14 +303,29 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const teacherId = (!isDemoMode && currentUser?.uid) ? currentUser.uid : 'teacher-demo';
     const existingCodes = new Set(students.map(s => s.uniqueCode));
     const uniqueCode = generateStudentCode(existingCodes);
+    const docClean = studentData.documentNumber ? String(studentData.documentNumber).trim() : '';
+
     const newStudent: Student = {
       ...studentData,
-      id: `std-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      id: `std-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       uniqueCode,
       active: true,
       createdAt: new Date().toISOString()
     };
-    setStudents(prev => [...prev, newStudent]);
+
+    if (docClean) {
+      newStudent.documentNumber = docClean;
+    } else {
+      delete newStudent.documentNumber;
+    }
+
+    const updated = [...students, newStudent];
+    setStudents(updated);
+    offlineStorage.saveLocal('students', updated);
+
+    // Recalcular el conteo exacto de estudiantes para el curso
+    const courseStudentCount = updated.filter(s => s.courseId === newStudent.courseId && s.active !== false).length;
+    updateCourse(newStudent.courseId, { studentCount: courseStudentCount });
 
     if (!isDemoMode && currentUser?.uid) {
       const payload = { ...newStudent, teacherId };
@@ -331,32 +346,58 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const createdList: Student[] = newStudentsList.map((item, index) => {
       const uniqueCode = generateStudentCode(existingCodes);
       existingCodes.add(uniqueCode);
-      return {
-        id: `std-${Date.now()}-${index}`,
+      const docClean = item.documentNumber ? String(item.documentNumber).trim() : '';
+
+      const st: Student = {
+        id: `std-${Date.now()}-${Math.random().toString(36).substring(2, 6)}-${index}`,
         courseId: activeCourse.id,
         listNumber: currentMaxListNum + index + 1,
         fullName: item.fullName.trim(),
-        documentNumber: item.documentNumber?.trim(),
         uniqueCode,
         active: true,
         createdAt: new Date().toISOString()
       };
+
+      if (docClean) {
+        st.documentNumber = docClean;
+      }
+
+      return st;
     });
 
-    setStudents(prev => [...prev, ...createdList]);
-    updateCourse(activeCourse.id, { studentCount: (activeCourse.studentCount || 0) + createdList.length });
+    const updatedStudents = [...students, ...createdList];
+    setStudents(updatedStudents);
+    offlineStorage.saveLocal('students', updatedStudents);
+
+    // Recalcular el conteo exacto de estudiantes activos del curso
+    const courseStudentCount = updatedStudents.filter(s => s.courseId === activeCourse.id && s.active !== false).length;
+    updateCourse(activeCourse.id, { studentCount: courseStudentCount });
 
     if (!isDemoMode && currentUser?.uid) {
-      batchSaveFirestore('students', createdList.map(s => ({ id: s.id, data: { ...s, teacherId } }))).catch(err => {
-        console.warn('Error guardando lote de estudiantes en Firestore:', err);
-      });
+      const batchPayload = createdList.map(s => ({
+        id: s.id,
+        data: { ...s, teacherId }
+      }));
+      batchSaveFirestore('students', batchPayload)
+        .then(() => {
+          console.log(`✓ ${createdList.length} estudiantes guardados en Firestore para ${activeCourse.name}`);
+        })
+        .catch(err => {
+          console.warn('Error guardando lote de estudiantes en Firestore, encolando offline:', err);
+          createdList.forEach(s => {
+            offlineStorage.addToSyncQueue({ action: 'create', collection: 'students', data: { ...s, teacherId } });
+          });
+        });
     }
 
     return createdList.length;
   };
 
   const updateStudent = (studentId: string, updates: Partial<Student>) => {
-    setStudents(prev => prev.map(s => s.id === studentId ? { ...s, ...updates } : s));
+    const updated = students.map(s => s.id === studentId ? { ...s, ...updates } : s);
+    setStudents(updated);
+    offlineStorage.saveLocal('students', updated);
+
     if (!isDemoMode && currentUser?.uid) {
       setFirestoreDoc('students', studentId, updates).catch(err => {
         console.warn('Error actualizando estudiante en Firestore:', err);
@@ -366,10 +407,22 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const deleteStudent = (studentId: string) => {
-    setStudents(prev => prev.map(s => s.id === studentId ? { ...s, active: false } : s));
+    const student = students.find(s => s.id === studentId);
+    const courseId = student?.courseId;
+
+    const updated = students.map(s => s.id === studentId ? { ...s, active: false } : s);
+    setStudents(updated);
+    offlineStorage.saveLocal('students', updated);
+
+    if (courseId) {
+      const courseStudentCount = updated.filter(s => s.courseId === courseId && s.active !== false).length;
+      updateCourse(courseId, { studentCount: courseStudentCount });
+    }
+
     if (!isDemoMode && currentUser?.uid) {
       setFirestoreDoc('students', studentId, { active: false }).catch(err => {
         console.warn('Error desactivando estudiante en Firestore:', err);
+        offlineStorage.addToSyncQueue({ action: 'update', collection: 'students', data: { id: studentId, active: false } });
       });
     }
   };
