@@ -14,6 +14,7 @@ import { StudentDetailPage } from './pages/StudentDetailPage';
 import { AttendancePage } from './pages/AttendancePage';
 import { ActivitiesPage } from './pages/ActivitiesPage';
 import { GradesPage } from './pages/GradesPage';
+import { FinalGradesPage } from './pages/FinalGradesPage';
 import { BehaviorPage } from './pages/BehaviorPage';
 import { QRCardsPage } from './pages/QRCardsPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -28,12 +29,12 @@ export function App() {
           <CourseProvider>
             <ToastProvider>
               <Routes>
-                {/* RUTAS PÚBLICAS PARA ESTUDIANTES Y FAMILIAS (Acceso por link o escaneo QR) */}
+                {/* RUTA PÚBLICA PARA ESTUDIANTES Y ACUDIENTES (Sin requerir login docente) */}
                 <Route path="/estudiante" element={<StudentPortalPage />} />
                 <Route path="/estudiante/:code" element={<StudentPortalPage />} />
-                <Route path="/portal-estudiante" element={<StudentPortalPage />} />
+                <Route path="/consulta" element={<StudentPortalPage />} />
 
-                {/* RUTAS PRIVADAS DEL DOCENTE */}
+                {/* RUTAS DEL DOCENTE (Protegidas dentro del AppLayout) */}
                 <Route element={<AppLayout />}>
                   <Route path="/" element={<HomePage />} />
                   <Route path="/scanner" element={<ScannerPage />} />
@@ -44,6 +45,8 @@ export function App() {
                   <Route path="/attendance/quick-scan" element={<ScannerPage />} />
                   <Route path="/activities" element={<ActivitiesPage />} />
                   <Route path="/grades" element={<GradesPage />} />
+                  <Route path="/definitivas" element={<FinalGradesPage />} />
+                  <Route path="/final-grades" element={<FinalGradesPage />} />
                   <Route path="/behavior" element={<BehaviorPage />} />
                   <Route path="/qr-cards" element={<QRCardsPage />} />
                   <Route path="/dashboard" element={<DashboardPage />} />

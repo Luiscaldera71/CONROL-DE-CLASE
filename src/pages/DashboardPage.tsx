@@ -56,9 +56,12 @@ export const DashboardPage: React.FC = () => {
     behaviorCategories: []
   };
 
+  const courseActivities = activities.filter(a => !activeCourse || a.courseId === activeCourse.id);
+  const courseSubmissions = submissions.filter(s => courseActivities.some(a => a.id === s.activityId));
+
   // Cálculo de alertas
   const riskEvaluations = students.map(student =>
-    calculateStudentRisk(student, activities, submissions, attendanceSessions, settings)
+    calculateStudentRisk(student, courseActivities, courseSubmissions, attendanceSessions, settings)
   );
 
   const highRisk = riskEvaluations.filter(r => r.level === 'high');
@@ -74,10 +77,12 @@ export const DashboardPage: React.FC = () => {
   };
 
   riskEvaluations.forEach(r => {
-    if (r.currentAverage < 3.0) gradeBins.critico++;
-    else if (r.currentAverage <= 3.7) gradeBins.basico++;
-    else if (r.currentAverage <= 4.5) gradeBins.alto++;
-    else gradeBins.superior++;
+    if (r.currentAverage > 0) {
+      if (r.currentAverage < 3.0) gradeBins.critico++;
+      else if (r.currentAverage <= 3.7) gradeBins.basico++;
+      else if (r.currentAverage <= 4.5) gradeBins.alto++;
+      else gradeBins.superior++;
+    }
   });
 
   const gradeDistributionData = {
@@ -87,10 +92,10 @@ export const DashboardPage: React.FC = () => {
         label: 'Estudiantes',
         data: [gradeBins.critico, gradeBins.basico, gradeBins.alto, gradeBins.superior],
         backgroundColor: [
-          'rgba(244, 63, 94, 0.7)',
-          'rgba(245, 158, 11, 0.7)',
-          'rgba(99, 102, 241, 0.7)',
-          'rgba(16, 185, 129, 0.7)'
+          '#f43f5e',
+          '#f59e0b',
+          '#2563eb',
+          '#10b981'
         ],
         borderRadius: 8
       }
@@ -109,10 +114,11 @@ export const DashboardPage: React.FC = () => {
           const present = s.summary.present + (s.summary.late * 0.8) + s.summary.excused;
           return Math.round((present / total) * 100);
         }),
-        borderColor: '#10b981',
-        backgroundColor: 'rgba(16, 185, 129, 0.15)',
+        borderColor: '#2563eb',
+        backgroundColor: 'rgba(37, 99, 235, 0.08)',
         tension: 0.35,
-        pointBackgroundColor: '#10b981'
+        pointBackgroundColor: '#2563eb',
+        pointRadius: 4
       }
     ]
   };
@@ -128,7 +134,7 @@ export const DashboardPage: React.FC = () => {
           const del = subs.filter(s => s.status === 'delivered' || s.status === 'late').length;
           return students.length > 0 ? Math.round((del / students.length) * 100) : 0;
         }),
-        backgroundColor: 'rgba(99, 102, 241, 0.7)',
+        backgroundColor: '#3b82f6',
         borderRadius: 6
       }
     ]
@@ -142,38 +148,38 @@ export const DashboardPage: React.FC = () => {
     },
     scales: {
       x: {
-        ticks: { color: '#94a3b8', font: { size: 10 } },
-        grid: { color: 'rgba(51, 65, 85, 0.3)' }
+        ticks: { color: '#64748b', font: { size: 10, weight: '600' } },
+        grid: { color: 'rgba(226, 232, 240, 0.6)' }
       },
       y: {
-        ticks: { color: '#94a3b8', font: { size: 10 } },
-        grid: { color: 'rgba(51, 65, 85, 0.3)' }
+        ticks: { color: '#64748b', font: { size: 10, weight: '600' } },
+        grid: { color: 'rgba(226, 232, 240, 0.6)' }
       }
     }
   };
 
   return (
-    <div className="space-y-5 max-w-5xl mx-auto">
+    <div className="space-y-5 max-w-5xl mx-auto pb-12">
       {/* CABECERA */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <BarChart3 className="w-5 h-5 text-indigo-400" />
+          <h1 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-blue-600" />
             <span>Dashboard y Analítica de Aula</span>
           </h1>
-          <p className="text-xs text-slate-400">
-            Curso <strong className="text-slate-200">{activeCourse?.name}</strong> • {activeCourse?.subject} ({activeCourse?.currentPeriod})
+          <p className="text-xs text-slate-500 font-medium">
+            Curso <strong className="text-slate-800">{activeCourse?.name}</strong> • {activeCourse?.subject} ({activeCourse?.currentPeriod})
           </p>
         </div>
       </div>
 
-      {/* GRÁFICOS ANALÍTICOS */}
+      {/* GRÁFICOS ANALÍTICOS (AbsenSiswa White Cards) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Gráfico 1: Distribución de Desempeño */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-xl">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-5 shadow-xs">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-white">Distribución de Notas del Aula</span>
-            <span className="text-[10px] text-slate-400">Escala 0.0 - 5.0</span>
+            <span className="text-xs font-bold text-slate-800">Distribución de Notas del Aula</span>
+            <span className="text-[10px] text-slate-400 font-semibold">Escala 0.0 - 5.0</span>
           </div>
           <div className="h-44">
             <Bar data={gradeDistributionData} options={chartOptions} />
@@ -181,10 +187,10 @@ export const DashboardPage: React.FC = () => {
         </div>
 
         {/* Gráfico 2: Evolución de Asistencia */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-xl">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-5 shadow-xs">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-white">Evolución de Asistencia por Sesión</span>
-            <span className="text-[10px] text-emerald-400 font-bold">% Asistencia</span>
+            <span className="text-xs font-bold text-slate-800">Evolución de Asistencia por Sesión</span>
+            <span className="text-[10px] text-blue-600 font-bold">% Asistencia</span>
           </div>
           <div className="h-44">
             <Line data={attendanceTrendData} options={chartOptions} />
@@ -192,10 +198,10 @@ export const DashboardPage: React.FC = () => {
         </div>
 
         {/* Gráfico 3: Control de Entregas por Actividad */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 md:col-span-2 shadow-xl">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-5 md:col-span-2 shadow-xs">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-white">Cumplimiento de Entregas por Actividad</span>
-            <span className="text-[10px] text-brand-300 font-bold">{activities.length} actividades</span>
+            <span className="text-xs font-bold text-slate-800">Cumplimiento de Entregas por Actividad</span>
+            <span className="text-[10px] text-blue-600 font-bold">{activities.length} actividades</span>
           </div>
           <div className="h-40">
             <Bar data={activityDeliveryData} options={chartOptions} />
@@ -204,14 +210,14 @@ export const DashboardPage: React.FC = () => {
       </div>
 
       {/* MÓDULO INTEGRAL: ALERTAS ACADÉMICAS Y SEGUIMIENTO EXPLICABLE */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 md:p-5 space-y-3.5 shadow-xl">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800">
+      <div className="bg-white border border-slate-200/90 rounded-3xl p-5 space-y-4 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
           <div>
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-rose-400" />
+            <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-rose-500" />
               <span>Seguimiento y Alertas Académicas</span>
             </h2>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-500 font-medium">
               Evaluación multifactorial automática basada en notas, entregas y asistencia
             </p>
           </div>
@@ -220,32 +226,40 @@ export const DashboardPage: React.FC = () => {
           <div className="flex items-center gap-1.5 flex-wrap">
             <button
               onClick={() => setAlertFilter('all')}
-              className={`px-2.5 py-1 rounded-xl text-xs font-semibold ${
-                alertFilter === 'all' ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400'
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                alertFilter === 'all'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100'
               }`}
             >
               Todos ({riskEvaluations.length})
             </button>
             <button
               onClick={() => setAlertFilter('high')}
-              className={`px-2.5 py-1 rounded-xl text-xs font-semibold ${
-                alertFilter === 'high' ? 'bg-rose-600 text-white' : 'bg-slate-800 text-rose-300'
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                alertFilter === 'high'
+                  ? 'bg-rose-600 text-white shadow-xs'
+                  : 'bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100'
               }`}
             >
               Atención ({highRisk.length})
             </button>
             <button
               onClick={() => setAlertFilter('medium')}
-              className={`px-2.5 py-1 rounded-xl text-xs font-semibold ${
-                alertFilter === 'medium' ? 'bg-amber-600 text-white' : 'bg-slate-800 text-amber-300'
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                alertFilter === 'medium'
+                  ? 'bg-amber-500 text-white shadow-xs'
+                  : 'bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100'
               }`}
             >
               Seguimiento ({mediumRisk.length})
             </button>
             <button
               onClick={() => setAlertFilter('low')}
-              className={`px-2.5 py-1 rounded-xl text-xs font-semibold ${
-                alertFilter === 'low' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-emerald-300'
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                alertFilter === 'low'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100'
               }`}
             >
               Al Día ({lowRisk.length})
@@ -254,32 +268,32 @@ export const DashboardPage: React.FC = () => {
         </div>
 
         {/* LISTA EXPLICADA DE ESTUDIANTES CON ALERTA */}
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           {riskEvaluations
             .filter(r => (alertFilter === 'all' ? true : r.level === alertFilter))
             .map(item => (
               <div
                 key={item.studentId}
                 onClick={() => navigate(`/students/${item.studentId}`)}
-                className={`p-3 rounded-2xl border transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs ${
                   item.level === 'high'
-                    ? 'bg-rose-950/20 border-rose-900/40 hover:border-rose-700/60'
+                    ? 'bg-rose-50/50 border-rose-200 hover:border-rose-300'
                     : item.level === 'medium'
-                    ? 'bg-amber-950/20 border-amber-900/40 hover:border-amber-700/60'
-                    : 'bg-slate-950/40 border-slate-800/80 hover:border-slate-700/60'
+                    ? 'bg-amber-50/50 border-amber-200 hover:border-amber-300'
+                    : 'bg-slate-50/60 border-slate-200/90 hover:border-blue-300'
                 }`}
               >
                 <div>
                   <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <span className="font-bold text-sm text-white">
+                    <span className="font-extrabold text-sm text-slate-900">
                       #{String(item.listNumber).padStart(2, '0')} {item.studentName}
                     </span>
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                       item.level === 'high'
-                        ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                        ? 'bg-rose-100 text-rose-700 border-rose-200'
                         : item.level === 'medium'
-                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                        : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                        ? 'bg-amber-100 text-amber-700 border-amber-200'
+                        : 'bg-emerald-100 text-emerald-700 border-emerald-200'
                     }`}>
                       {item.level === 'high' ? 'Atención Prioritaria' : item.level === 'medium' ? 'En Seguimiento' : 'Sin Alerta'}
                     </span>
@@ -287,22 +301,22 @@ export const DashboardPage: React.FC = () => {
 
                   {/* Motivos explicados de la alerta */}
                   {item.reasons.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5 text-[11px] text-slate-300 mt-1">
+                    <div className="flex flex-wrap gap-1.5 text-[11px] text-slate-600 mt-1">
                       {item.reasons.map((reason, i) => (
-                        <span key={i} className="bg-slate-900/90 px-2 py-0.5 rounded-md border border-slate-800">
+                        <span key={i} className="bg-white px-2 py-0.5 rounded-md border border-slate-200 font-medium">
                           • {reason}
                         </span>
                       ))}
                     </div>
                   ) : (
-                    <span className="text-[11px] text-emerald-400">Cumple adecuadamente con todas las metas.</span>
+                    <span className="text-[11px] text-emerald-700 font-medium">Cumple adecuadamente con todas las metas.</span>
                   )}
                 </div>
 
                 <div className="flex items-center gap-4 shrink-0 self-end sm:self-center">
                   <div className="text-right text-xs">
-                    <div className="text-slate-400">Promedio: <strong className="text-white">{item.currentAverage}</strong></div>
-                    <div className="text-slate-400">Asistencia: <strong className="text-white">{item.attendanceRate}%</strong></div>
+                    <div className="text-slate-500 font-medium">Promedio: <strong className="text-slate-900">{item.currentAverage > 0 ? item.currentAverage : '—'}</strong></div>
+                    <div className="text-slate-500 font-medium">Asistencia: <strong className="text-slate-900">{item.attendanceRate}%</strong></div>
                   </div>
                   <ChevronRight className="w-4 h-4 text-slate-400" />
                 </div>

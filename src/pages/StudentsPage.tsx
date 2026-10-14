@@ -15,9 +15,7 @@ import {
   CheckCircle,
   X,
   Phone,
-  Edit2,
-  Trash2,
-  Share2
+  Edit2
 } from 'lucide-react';
 import { useCourse } from '../context/CourseContext';
 import { useToast } from '../context/ToastContext';
@@ -26,7 +24,7 @@ import { Student } from '../types';
 import { StudentImportModal } from '../components/students/StudentImportModal';
 
 export const StudentsPage: React.FC = () => {
-  const { students, activeCourse, addStudent, updateStudent, deleteStudent, clearCourseStudents } = useCourse();
+  const { students, activeCourse, addStudent, updateStudent, deleteStudent } = useCourse();
   const { showToast } = useToast();
   const navigate = useNavigate();
 
@@ -68,116 +66,81 @@ export const StudentsPage: React.FC = () => {
     setIsNewStudentModalOpen(false);
   };
 
+  const handleDownloadTemplate = () => {
+    excelService.downloadStudentTemplate(activeCourse?.name, activeCourse);
+    showToast('✓ Descargando formato oficial de estudiantes (.xlsx)', 'success');
+  };
+
   const handleExport = () => {
     if (!activeCourse) return;
-    excelService.exportStudents(students, activeCourse.name);
-    showToast(`✓ Archivo Excel generado para ${activeCourse.name}`, 'info');
-  };
-
-  const handleClearAllStudents = async () => {
-    if (!activeCourse || students.length === 0) return;
-    const confirmed = window.confirm(
-      `¿Deseas eliminar definitivamente los ${students.length} estudiantes de ${activeCourse.name} de Firebase Firestore?\n\nEsto limpiará la base de datos para que quede vacía y lista para importar tu archivo Excel.`
-    );
-    if (!confirmed) return;
-    try {
-      const deleted = await clearCourseStudents(activeCourse.id);
-      showToast(`✓ Se eliminaron ${deleted} estudiantes de Firebase Firestore`, 'info');
-    } catch (err: any) {
-      showToast('Error al vaciar estudiantes: ' + err.message, 'error');
-    }
-  };
-
-  const handleDeleteSingleStudent = async (student: Student) => {
-    const confirmed = window.confirm(`¿Eliminar a "${student.fullName}" definitivamente de Firebase?`);
-    if (!confirmed) return;
-    try {
-      await deleteStudent(student.id);
-      showToast(`✓ ${student.fullName} eliminado de la base de datos`, 'info');
-    } catch (err: any) {
-      showToast('Error al eliminar estudiante: ' + err.message, 'error');
-    }
+    excelService.exportStudents(students, activeCourse.name, activeCourse);
+    showToast(`✓ Listado de estudiantes exportado a Excel con diseño profesional`, 'success');
   };
 
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
-      {/* ENCABEZADO Y ACCIONES PRINCIPALES */}
+      {/* ENCABEZADO Y ACCIONES PRINCIPALES (Estilo AbsenSiswa) */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <Users className="w-5 h-5 text-brand-400" />
+          <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+            <Users className="w-5 h-5 text-blue-600" />
             <span>Listado de Estudiantes</span>
           </h1>
-          <p className="text-xs text-slate-400">
-            Curso <strong className="text-slate-200">{activeCourse?.name}</strong> • {students.length} estudiantes registrados
+          <p className="text-xs text-slate-500">
+            Curso: <strong className="text-slate-800">{activeCourse?.name}</strong> • {students.length} estudiantes registrados
           </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={() => setIsImportModalOpen(true)}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-xl text-xs font-bold active:scale-95 transition-all"
+            onClick={handleDownloadTemplate}
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-2xl text-xs font-bold active:scale-95 transition-all shadow-xs"
+            title="Descargar formato oficial en Excel para que llenes con tus alumnos y lo subas"
           >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-            <span>Importar Excel/CSV</span>
+            <Download className="w-4 h-4 text-emerald-600" />
+            <span>Descargar Formato</span>
+          </button>
+
+          <button
+            onClick={() => setIsImportModalOpen(true)}
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-bold active:scale-95 transition-all shadow-xs"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            <span>Subir Excel</span>
           </button>
 
           <button
             onClick={() => setIsNewStudentModalOpen(true)}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold shadow-touch active:scale-95 transition-all"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-bold shadow-md shadow-blue-500/25 active:scale-95 transition-all"
           >
             <UserPlus className="w-4 h-4" />
             <span>Nuevo Estudiante</span>
           </button>
 
           <button
-            onClick={() => {
-              const url = `${window.location.origin}/estudiante`;
-              navigator.clipboard.writeText(url);
-              showToast('✓ Enlace del Portal de Estudiantes copiado al portapapeles', 'info');
-            }}
-            title="Copiar enlace del portal estudiantil para compartir con acudientes y alumnos"
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 rounded-xl text-xs font-bold active:scale-95 transition-all"
-          >
-            <Share2 className="w-4 h-4 text-indigo-400" />
-            <span>Portal Estudiantes</span>
-          </button>
-
-          <button
             onClick={handleExport}
-            title="Exportar a Excel"
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700 text-xs"
+            title="Exportar listado actual a Excel"
+            className="p-2.5 bg-white hover:bg-slate-50 text-slate-700 rounded-2xl border border-slate-200 text-xs shadow-xs"
           >
             <Download className="w-4 h-4" />
           </button>
-
-          {students.length > 0 && (
-            <button
-              onClick={handleClearAllStudents}
-              title="Vaciar y eliminar todos los estudiantes de este curso en Firestore"
-              className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl border border-rose-500/30 text-xs flex items-center gap-1 transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span className="hidden sm:inline text-[11px] font-semibold">Vaciar Curso</span>
-            </button>
-          )}
         </div>
       </div>
 
       {/* BARRA DE BÚSQUEDA TÁCTIL */}
       <div className="relative">
-        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+        <Search className="w-4 h-4 text-slate-400 absolute left-4 top-3.5" />
         <input
           type="text"
           value={searchTerm}
           onChange={e => setSearchTerm(e.target.value)}
           placeholder="Buscar por nombre, código único (ej: A7K92P), número de lista o documento..."
-          className="w-full bg-slate-900 border border-slate-800 focus:border-brand-500 rounded-2xl pl-10 pr-9 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition-colors"
+          className="w-full bg-white rounded-2xl border border-slate-200 pl-11 pr-10 py-3 text-xs md:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 shadow-xs transition-colors"
         />
         {searchTerm && (
           <button
             onClick={() => setSearchTerm('')}
-            className="absolute right-3 top-2.5 text-slate-400 hover:text-white"
+            className="absolute right-3.5 top-3.5 text-slate-400 hover:text-slate-600"
           >
             <X className="w-4 h-4" />
           </button>
@@ -186,23 +149,25 @@ export const StudentsPage: React.FC = () => {
 
       {/* ESTADO VACÍO */}
       {students.length === 0 ? (
-        <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-8 text-center max-w-md mx-auto my-8">
-          <Users className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-          <h2 className="text-base font-bold text-white mb-1">No tienes estudiantes todavía</h2>
-          <p className="text-xs text-slate-400 mb-5">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto my-8 shadow-xs">
+          <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-3">
+            <Users className="w-7 h-7" />
+          </div>
+          <h2 className="text-base font-bold text-slate-900 mb-1">No tienes estudiantes todavía</h2>
+          <p className="text-xs text-slate-500 mb-5 leading-relaxed">
             Carga tu lista desde un archivo Excel o añade manualmente los alumnos para generar sus carnés y códigos QR.
           </p>
           <div className="flex flex-col gap-2">
             <button
               onClick={() => setIsImportModalOpen(true)}
-              className="py-2.5 px-4 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold shadow-touch flex items-center justify-center gap-2"
+              className="py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-bold shadow-md shadow-blue-500/25 flex items-center justify-center gap-2"
             >
               <FileSpreadsheet className="w-4 h-4" />
               <span>Importar listado desde Excel</span>
             </button>
             <button
               onClick={() => setIsNewStudentModalOpen(true)}
-              className="py-2 px-4 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold"
+              className="py-2.5 px-4 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-2xl text-xs font-bold border border-slate-200"
             >
               Crear estudiante manual
             </button>
@@ -212,29 +177,29 @@ export const StudentsPage: React.FC = () => {
         /* LISTADO DE TARJETAS TÁCTILES */
         <div className="space-y-2">
           {filteredStudents.length === 0 ? (
-            <div className="p-6 text-center text-slate-400 bg-slate-900 rounded-2xl border border-slate-800">
+            <div className="p-8 text-center text-slate-500 bg-white border border-slate-200 rounded-3xl">
               No se encontraron estudiantes para "{searchTerm}".
             </div>
           ) : (
             filteredStudents.map(student => (
               <div
                 key={student.id}
-                className="bg-slate-900/90 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-3.5 flex items-center justify-between gap-3 transition-colors"
+                className="bg-white border border-slate-200/90 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-xs hover:border-blue-300 transition-all"
               >
                 {/* Info Estudiante */}
                 <div
                   onClick={() => navigate(`/students/${student.id}`)}
                   className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
                 >
-                  <span className="w-8 h-8 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-mono font-bold text-xs flex items-center justify-center shrink-0">
+                  <span className="w-9 h-9 rounded-xl bg-blue-50 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0 border border-blue-100">
                     #{String(student.listNumber).padStart(2, '0')}
                   </span>
                   <div className="truncate">
-                    <h3 className="font-bold text-sm text-white truncate hover:text-brand-300 transition-colors">
+                    <h3 className="font-bold text-sm text-slate-900 truncate hover:text-blue-600 transition-colors">
                       {student.fullName}
                     </h3>
                     <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                      <span className="font-mono bg-brand-500/10 text-brand-300 px-1.5 py-0.2 rounded font-semibold border border-brand-500/20">
+                      <span className="font-mono bg-blue-50 text-blue-700 px-1.5 py-0.2 rounded-md font-bold border border-blue-200">
                         {student.uniqueCode}
                       </span>
                       {student.documentNumber && <span>Doc: {student.documentNumber}</span>}
@@ -247,31 +212,18 @@ export const StudentsPage: React.FC = () => {
                   {/* Botón QR */}
                   <button
                     onClick={() => setSelectedQRStudent(student)}
-                    className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl border border-slate-700 transition-colors"
+                    className="p-2 bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-600 rounded-xl border border-slate-200 transition-colors"
                     title="Ver QR"
                   >
-                    <QrCode className="w-4 h-4 text-brand-400" />
+                    <QrCode className="w-4 h-4" />
                   </button>
 
                   {/* Ver Perfil */}
                   <button
                     onClick={() => navigate(`/students/${student.id}`)}
-                    className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-colors"
-                    title="Ver detalles"
+                    className="p-2 hover:bg-slate-100 text-slate-400 hover:text-slate-700 rounded-xl transition-colors"
                   >
                     <ChevronRight className="w-5 h-5" />
-                  </button>
-
-                  {/* Eliminar estudiante */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteSingleStudent(student);
-                    }}
-                    className="p-2 hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 rounded-xl transition-colors"
-                    title="Eliminar de Firebase"
-                  >
-                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -282,19 +234,19 @@ export const StudentsPage: React.FC = () => {
 
       {/* MODAL VER QR INDIVIDUAL */}
       {selectedQRStudent && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-xs text-center shadow-2xl">
-            <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-800">
-              <span className="text-xs font-bold text-slate-400">Carné Digital</span>
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 w-full max-w-xs text-center shadow-2xl">
+            <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-100">
+              <span className="text-xs font-bold text-slate-500">Carné Digital</span>
               <button
                 onClick={() => setSelectedQRStudent(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-full"
+                className="text-slate-400 hover:text-slate-700 p-1 rounded-full"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="bg-white p-4 rounded-2xl inline-block shadow-inner mb-3">
+            <div className="bg-white p-4 rounded-2xl inline-block border border-slate-100 shadow-sm mb-3">
               <QRCodeSVG
                 value={`AC:${selectedQRStudent.uniqueCode}`}
                 size={180}
@@ -303,11 +255,11 @@ export const StudentsPage: React.FC = () => {
               />
             </div>
 
-            <div className="font-mono text-xl font-black text-brand-400 tracking-wider mb-1">
+            <div className="font-mono text-xl font-black text-blue-600 tracking-wider mb-1">
               {selectedQRStudent.uniqueCode}
             </div>
 
-            <div className="font-bold text-white text-sm mb-0.5">
+            <div className="font-bold text-slate-900 text-sm mb-0.5">
               #{String(selectedQRStudent.listNumber).padStart(2, '0')} {selectedQRStudent.fullName}
             </div>
             <div className="text-xs text-slate-400 mb-4">{activeCourse?.name} • {activeCourse?.subject}</div>
@@ -318,7 +270,7 @@ export const StudentsPage: React.FC = () => {
                   setSelectedQRStudent(null);
                   navigate(`/students/${selectedQRStudent.id}`);
                 }}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 rounded-xl"
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 rounded-xl"
               >
                 Ver Perfil
               </button>
@@ -327,7 +279,7 @@ export const StudentsPage: React.FC = () => {
                   setSelectedQRStudent(null);
                   navigate('/qr-cards');
                 }}
-                className="flex-1 py-2.5 bg-brand-600 hover:bg-brand-500 text-xs font-bold text-white rounded-xl"
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-xs font-bold text-white rounded-xl shadow-sm"
               >
                 Imprimir
               </button>
@@ -338,21 +290,21 @@ export const StudentsPage: React.FC = () => {
 
       {/* MODAL CREAR NUEVO ESTUDIANTE */}
       {isNewStudentModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 md:p-6 w-full max-w-md shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
-              <h2 className="text-base font-bold text-white">Nuevo Estudiante</h2>
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 w-full max-w-md shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <h2 className="text-base font-black text-slate-900">Nuevo Estudiante</h2>
               <button
                 onClick={() => setIsNewStudentModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-white rounded-full bg-slate-800"
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-full bg-slate-100"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateStudent} className="space-y-3.5">
+            <form onSubmit={handleCreateStudent} className="space-y-4">
               <div>
-                <label className="text-xs text-slate-300 font-semibold block mb-1">
+                <label className="text-xs text-slate-700 font-bold block mb-1">
                   Nombre Completo *
                 </label>
                 <input
@@ -361,12 +313,12 @@ export const StudentsPage: React.FC = () => {
                   value={newStudentName}
                   onChange={e => setNewStudentName(e.target.value)}
                   placeholder="Ej: Daniel Alejandro Mora"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-3.5 py-3 text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
                 />
               </div>
 
               <div>
-                <label className="text-xs text-slate-300 font-semibold block mb-1">
+                <label className="text-xs text-slate-700 font-bold block mb-1">
                   Documento de Identidad (Opcional)
                 </label>
                 <input
@@ -374,7 +326,7 @@ export const StudentsPage: React.FC = () => {
                   value={newStudentDoc}
                   onChange={e => setNewStudentDoc(e.target.value)}
                   placeholder="Ej: 1098456789"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-3.5 py-3 text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
                 />
               </div>
 
@@ -382,13 +334,13 @@ export const StudentsPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsNewStudentModalOpen(false)}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold"
+                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl text-xs font-bold"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold shadow-touch active:scale-95 transition-all"
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-bold shadow-md shadow-blue-500/25 active:scale-95 transition-all"
                 >
                   Guardar Estudiante
                 </button>

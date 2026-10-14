@@ -17,14 +17,121 @@ export function generateStudentCode(existingCodes?: Set<string>): string {
   return code;
 }
 
+export const DEFAULT_PORTAL_DOMAIN = 'https://controldeclase.vercel.app';
+
+/**
+ * Obtiene la URL completa del Portal del Estudiante para incrustar en el código QR.
+ * Cuando un estudiante o acudiente escanea con la cámara nativa de su celular,
+ * el teléfono abrirá directamente esta dirección web cargando sus notas y asistencias.
+ */
+export function getStudentPortalUrl(uniqueCode: string): string {
+  const clean = uniqueCode.trim().toUpperCase();
+  
+  // 1. Revisar si el docente configuró un dominio web personalizado en localStorage
+  let baseUrl = '';
+  try {
+    baseUrl = localStorage.getItem('aulacontrol_custom_portal_url') || '';
+  } catch {
+    // ignorar error de acceso a storage
+  }
+
+  // 2. Por defecto siempre usar https://controldeclase.vercel.app
+  if (!baseUrl.trim()) {
+    baseUrl = DEFAULT_PORTAL_DOMAIN;
+  }
+
+  // Quitar barra final si la tiene
+  baseUrl = baseUrl.trim().replace(/\/+$/, '');
+
+  return `${baseUrl}/estudiante?codigo=${encodeURIComponent(clean)}`;
+}
+
+/**
+ * Limpia y extrae el código único del estudiante desde cualquier formato de QR:
+ * - URL completa: https://miapp.com/estudiante?codigo=A7K92P
+ * - URL en path: https://miapp.com/estudiante/A7K92P
+ * - Prefijo clásico: AC:A7K92P
+ * - Código directo: A7K92P
+ */
 export function cleanQRCode(rawPayload: string): string {
   if (!rawPayload) return '';
-  const trimmed = rawPayload.trim().toUpperCase();
-  // Si viene con prefijo seguro "AC:" o similar
-  if (trimmed.startsWith('AC:')) {
-    return trimmed.substring(3).trim();
+  let text = String(rawPayload).trim();
+
+  // Decodificar si viene con codificación de URI (ej: %2F, %3F, %3D)
+  try {
+    text = decodeURIComponent(text);
+  } catch {
+    // Si falla, continuar con text
   }
-  return trimmed;
+
+  // Quitar comillas o espacios envolventes accidentales
+  text = text.replace(/^["'`]|["'`]$/g, '').trim();
+
+  // 1. Si contiene el parámetro ?codigo=, &codigo=, #codigo= o ?code=, &code=, #code=
+  const paramMatch = text.match(/[?&#](?:codigo|code)=([A-Za-z0-9_-]+)/i);
+  if (paramMatch && paramMatch[1]) {
+    return paramMatch[1].trim().toUpperCase();
+  }
+
+  // 2. Si viene en la ruta como /estudiante/CODIGO o /consulta/CODIGO o /student/CODIGO
+  const pathMatch = text.match(/\/(?:estudiante|consulta|student)\/([A-Za-z0-9_-]+)/i);
+  if (pathMatch && pathMatch[1]) {
+    return pathMatch[1].trim().toUpperCase();
+  }
+
+  // 3. Si contiene un enlace web (Vercel, controldeclase, localhost o cualquier URL http/https)
+  if (
+    text.toLowerCase().includes('vercel.app') ||
+    text.toLowerCase().includes('controldeclase') ||
+    text.toLowerCase().startsWith('http://') ||
+    text.toLowerCase().startsWith('https://') ||
+    text.toLowerCase().includes('://')
+  ) {
+    try {
+      const urlToParse = text.startsWith('http') ? text : `https://${text}`;
+      const urlObj = new URL(urlToParse);
+
+      // Buscar en search params
+      const codeFromSearch = urlObj.searchParams.get('codigo') || urlObj.searchParams.get('code');
+      if (codeFromSearch) {
+        return codeFromSearch.trim().toUpperCase();
+      }
+
+      // Buscar en hash si existe (#/estudiante?codigo=...)
+      if (urlObj.hash) {
+        const hashMatch = urlObj.hash.match(/[?&#](?:codigo|code)=([A-Za-z0-9_-]+)/i);
+        if (hashMatch && hashMatch[1]) {
+          return hashMatch[1].trim().toUpperCase();
+        }
+        const hashPathMatch = urlObj.hash.match(/\/(?:estudiante|consulta|student)\/([A-Za-z0-9_-]+)/i);
+        if (hashPathMatch && hashPathMatch[1]) {
+          return hashPathMatch[1].trim().toUpperCase();
+        }
+      }
+
+      // Buscar último segmento del pathname
+      const parts = urlObj.pathname.split('/').filter(Boolean);
+      const last = parts[parts.length - 1];
+      if (last && !['estudiante', 'consulta', 'student', 'index.html', ''].includes(last.toLowerCase())) {
+        return last.trim().toUpperCase();
+      }
+      return '';
+    } catch {
+      const fallbackMatch = text.match(/(?:codigo|code)=([A-Za-z0-9_-]+)/i);
+      if (fallbackMatch && fallbackMatch[1]) {
+        return fallbackMatch[1].trim().toUpperCase();
+      }
+      return '';
+    }
+  }
+
+  // 4. Si viene con prefijo clásico AC: (ej: AC:A7K92P)
+  let upper = text.toUpperCase();
+  if (upper.startsWith('AC:')) {
+    upper = upper.substring(3).trim();
+  }
+
+  return upper.trim();
 }
 
 // Audio Feedback con Web Audio API (ligero, sin descargar archivos externos)

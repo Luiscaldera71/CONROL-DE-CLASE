@@ -1,24 +1,14 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import {
-  Course,
-  Student,
-  Activity,
-  Submission,
-  AttendanceSession,
-  BehaviorRecord,
-  StudentObservation,
-  AttendanceStatus
-} from '../types';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { Course, Student, Activity, Submission, AttendanceSession, BehaviorRecord, StudentObservation, AttendanceStatus } from '../types';
+import { DEMO_COURSES, DEMO_STUDENTS, DEMO_ACTIVITIES, DEMO_SUBMISSIONS, DEMO_ATTENDANCE_SESSIONS, DEMO_BEHAVIORS } from '../services/mockData';
 import { offlineStorage } from '../services/offlineStorage';
-import { generateStudentCode } from '../utils/codeGenerator';
+import { generateStudentCode, cleanQRCode } from '../utils/codeGenerator';
+import { getLocalDateString, getColombiaDateString } from '../utils/dateUtils';
 import { useAuth } from './AuthContext';
 import {
   setFirestoreDoc,
   deleteFirestoreDoc,
   batchSaveFirestore,
-  batchDeleteFirestore,
-  deleteStudentsByCourse,
-  cleanForFirestore,
   subscribeToCollection,
   isFirestoreReady
 } from '../services/firestoreService';
@@ -38,15 +28,13 @@ interface CourseContextType {
   selectCourse: (courseId: string) => void;
   addCourse: (courseData: Omit<Course, 'id' | 'teacherId' | 'createdAt'>) => Course;
   updateCourse: (courseId: string, updates: Partial<Course>) => void;
-  updateAllCoursesInstitution: (institutionName: string) => Promise<void>;
-  deleteCourse: (courseId: string) => Promise<void>;
+  deleteCourse: (courseId: string) => void;
 
   // Acciones Estudiantes
   addStudent: (studentData: Omit<Student, 'id' | 'uniqueCode' | 'createdAt' | 'active'>) => Student;
-  importStudents: (newStudentsList: { fullName: string; documentNumber?: string }[], replaceExisting?: boolean) => Promise<number>;
-  clearCourseStudents: (courseId: string) => Promise<number>;
+  importStudents: (newStudentsList: { fullName: string; documentNumber?: string }[]) => number;
   updateStudent: (studentId: string, updates: Partial<Student>) => void;
-  deleteStudent: (studentId: string) => Promise<void>;
+  deleteStudent: (studentId: string) => void;
   getStudentByCode: (code: string) => Student | undefined;
   getStudentById: (id: string) => Student | undefined;
 
@@ -54,13 +42,7 @@ interface CourseContextType {
   addActivity: (activityData: Omit<Activity, 'id' | 'createdAt'>) => Activity;
   updateActivity: (activityId: string, updates: Partial<Activity>) => void;
   deleteActivity: (activityId: string) => void;
-  recordSubmission: (
-    activityId: string,
-    studentId: string,
-    status: Submission['status'],
-    grade?: number | null,
-    feedback?: string
-  ) => void;
+  recordSubmission: (activityId: string, studentId: string, status: Submission['status'], grade?: number | null, feedback?: string) => void;
 
   // Acciones Asistencia
   recordAttendance: (date: string, studentId: string, status: AttendanceStatus, source?: 'qr' | 'manual') => void;
@@ -69,137 +51,94 @@ interface CourseContextType {
   // Acciones Comportamiento y Observación
   addBehaviorRecord: (record: Omit<BehaviorRecord, 'id' | 'createdAt'>) => void;
   addObservation: (studentId: string, text: string) => void;
+
+  // Reset y eliminación de datos
+  clearAllData: () => void;
+  resetToDemoData: () => void;
+  seedDemoToFirestore: () => Promise<void>;
 }
 
 const CourseContext = createContext<CourseContextType | undefined>(undefined);
 
-// Función para fusionar datos remotos con cambios locales pendientes en la cola offline
-const mergeWithLocalPending = <T extends { id: string }>(
-  remoteItems: T[],
-  localItems: T[],
-  collectionName: string
-): T[] => {
-  const syncQueue = offlineStorage.getSyncQueue().filter(q => q.collection === collectionName);
-  const pendingIds = new Set(syncQueue.map(q => q.data?.id || (typeof q.data === 'string' ? q.data : '')));
-
-  const map = new Map<string, T>();
-  // 1. Añadir remotos
-  remoteItems.forEach(item => map.set(item.id, item));
-
-  // 2. Si hay locales que tienen cambios pendientes en la cola offline, prevalece la versión local
-  localItems.forEach(localItem => {
-    if (pendingIds.has(localItem.id)) {
-      map.set(localItem.id, localItem);
-      return;
-    }
-    // Si no está en remoto pero existe localmente, conservarlo
-    if (!map.has(localItem.id)) {
-      map.set(localItem.id, localItem);
-    }
-  });
-
-  return Array.from(map.values());
-};
-
 export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, isDemoMode, teacherProfile } = useAuth();
   const [isLoadingData, setIsLoadingData] = useState<boolean>(false);
 
-  // Estados locales reales inicializados directamente desde la caché local para disponibilidad offline instantánea
-  const [courses, setCourses] = useState<Course[]>(() => {
-    const uid = currentUser?.uid;
-    return uid ? offlineStorage.getLocal<Course[]>(`courses_${uid}`, []) : [];
-  });
-  const [activeCourseId, setActiveCourseId] = useState<string>(() => {
-    const uid = currentUser?.uid;
-    return uid ? offlineStorage.getLocal<string>(`activeCourseId_${uid}`, '') : '';
-  });
-  const [students, setStudents] = useState<Student[]>(() => {
-    const uid = currentUser?.uid;
-    return uid ? offlineStorage.getLocal<Student[]>(`students_${uid}`, []) : [];
-  });
-  const [activities, setActivities] = useState<Activity[]>(() => {
-    const uid = currentUser?.uid;
-    return uid ? offlineStorage.getLocal<Activity[]>(`activities_${uid}`, []) : [];
-  });
-  const [submissions, setSubmissions] = useState<Submission[]>(() => {
-    const uid = currentUser?.uid;
-    return uid ? offlineStorage.getLocal<Submission[]>(`submissions_${uid}`, []) : [];
-  });
-  const [attendanceSessions, setAttendanceSessions] = useState<AttendanceSession[]>(() => {
-    const uid = currentUser?.uid;
-    return uid ? offlineStorage.getLocal<AttendanceSession[]>(`attendanceSessions_${uid}`, []) : [];
-  });
-  const [behaviorRecords, setBehaviorRecords] = useState<BehaviorRecord[]>(() => {
-    const uid = currentUser?.uid;
-    return uid ? offlineStorage.getLocal<BehaviorRecord[]>(`behaviorRecords_${uid}`, []) : [];
-  });
-  const [observations, setObservations] = useState<StudentObservation[]>(() => {
-    const uid = currentUser?.uid;
-    return uid ? offlineStorage.getLocal<StudentObservation[]>(`observations_${uid}`, []) : [];
-  });
+  // Estados locales iniciales (por defecto vacíos para no cargar demo forzada)
+  const [courses, setCourses] = useState<Course[]>(() =>
+    offlineStorage.getLocal('courses', [])
+  );
 
-  // Sincronización en tiempo real con Firestore cuando el docente está autenticado
+  const [activeCourseId, setActiveCourseId] = useState<string>(() =>
+    offlineStorage.getLocal('activeCourseId', '')
+  );
+
+  const [students, setStudents] = useState<Student[]>(() =>
+    offlineStorage.getLocal('students', [])
+  );
+
+  const [activities, setActivities] = useState<Activity[]>(() =>
+    offlineStorage.getLocal('activities', [])
+  );
+
+  const [submissions, setSubmissions] = useState<Submission[]>(() =>
+    offlineStorage.getLocal('submissions', [])
+  );
+
+  const [attendanceSessions, setAttendanceSessions] = useState<AttendanceSession[]>(() =>
+    offlineStorage.getLocal('attendanceSessions', [])
+  );
+
+  const [behaviorRecords, setBehaviorRecords] = useState<BehaviorRecord[]>(() =>
+    offlineStorage.getLocal('behaviorRecords', [])
+  );
+
+  const [observations, setObservations] = useState<StudentObservation[]>(() =>
+    offlineStorage.getLocal('observations', [])
+  );
+
+  // Sincronización en tiempo real con Firestore cuando el usuario esté autenticado
   useEffect(() => {
-    if (currentUser?.uid && isFirestoreReady()) {
+    if (!isDemoMode && currentUser?.uid && isFirestoreReady()) {
       setIsLoadingData(true);
       const uid = currentUser.uid;
 
-      // Cargar caché local específica del docente si existe
-      const cachedCourses = offlineStorage.getLocal<Course[]>(`courses_${uid}`, []);
-      const cachedStudents = offlineStorage.getLocal<Student[]>(`students_${uid}`, []);
-      const cachedActs = offlineStorage.getLocal<Activity[]>(`activities_${uid}`, []);
-      const cachedSubs = offlineStorage.getLocal<Submission[]>(`submissions_${uid}`, []);
-      const cachedAtt = offlineStorage.getLocal<AttendanceSession[]>(`attendanceSessions_${uid}`, []);
-      const cachedBeh = offlineStorage.getLocal<BehaviorRecord[]>(`behaviorRecords_${uid}`, []);
-      const cachedObs = offlineStorage.getLocal<StudentObservation[]>(`observations_${uid}`, []);
-
-      if (cachedCourses.length > 0) {
-        setCourses(prev => (prev.length > 0 ? prev : cachedCourses));
-        setActiveCourseId(prev => prev || cachedCourses[0].id);
-      }
-      if (cachedStudents.length > 0) setStudents(prev => (prev.length > 0 ? prev : cachedStudents));
-      if (cachedActs.length > 0) setActivities(prev => (prev.length > 0 ? prev : cachedActs));
-      if (cachedSubs.length > 0) setSubmissions(prev => (prev.length > 0 ? prev : cachedSubs));
-      if (cachedAtt.length > 0) setAttendanceSessions(prev => (prev.length > 0 ? prev : cachedAtt));
-      if (cachedBeh.length > 0) setBehaviorRecords(prev => (prev.length > 0 ? prev : cachedBeh));
-      if (cachedObs.length > 0) setObservations(prev => (prev.length > 0 ? prev : cachedObs));
-
-      // Suscripciones Firestore con fusión inteligente de cambios locales pendientes
       const unsubCourses = subscribeToCollection<Course>('courses', uid, (remoteCourses) => {
-        setCourses(prev => {
-          const merged = mergeWithLocalPending(remoteCourses, prev, 'courses');
-          if (merged.length > 0) {
-            setActiveCourseId(curr => (merged.some(c => c.id === curr) ? curr : merged[0].id));
-          } else {
-            setActiveCourseId('');
-          }
-          return merged;
-        });
+        setCourses(remoteCourses);
+        offlineStorage.saveLocal('courses', remoteCourses);
+        if (remoteCourses.length > 0 && !remoteCourses.some(c => c.id === activeCourseId)) {
+          setActiveCourseId(remoteCourses[0].id);
+        }
       });
 
       const unsubStudents = subscribeToCollection<Student>('students', uid, (remoteStudents) => {
-        setStudents(prev => mergeWithLocalPending(remoteStudents, prev, 'students'));
+        setStudents(remoteStudents);
+        offlineStorage.saveLocal('students', remoteStudents);
       });
 
       const unsubActivities = subscribeToCollection<Activity>('activities', uid, (remoteActs) => {
-        setActivities(prev => mergeWithLocalPending(remoteActs, prev, 'activities'));
+        setActivities(remoteActs);
+        offlineStorage.saveLocal('activities', remoteActs);
       });
 
       const unsubSubmissions = subscribeToCollection<Submission>('submissions', uid, (remoteSubs) => {
-        setSubmissions(prev => mergeWithLocalPending(remoteSubs, prev, 'submissions'));
+        setSubmissions(remoteSubs);
+        offlineStorage.saveLocal('submissions', remoteSubs);
       });
 
       const unsubAttendance = subscribeToCollection<AttendanceSession>('attendanceSessions', uid, (remoteAtt) => {
-        setAttendanceSessions(prev => mergeWithLocalPending(remoteAtt, prev, 'attendanceSessions'));
+        setAttendanceSessions(remoteAtt);
+        offlineStorage.saveLocal('attendanceSessions', remoteAtt);
       });
 
       const unsubBehaviors = subscribeToCollection<BehaviorRecord>('behaviorRecords', uid, (remoteBeh) => {
-        setBehaviorRecords(prev => mergeWithLocalPending(remoteBeh, prev, 'behaviorRecords'));
+        setBehaviorRecords(remoteBeh);
+        offlineStorage.saveLocal('behaviorRecords', remoteBeh);
       });
 
       const unsubObservations = subscribeToCollection<StudentObservation>('observations', uid, (remoteObs) => {
-        setObservations(prev => mergeWithLocalPending(remoteObs, prev, 'observations'));
+        setObservations(remoteObs);
+        offlineStorage.saveLocal('observations', remoteObs);
         setIsLoadingData(false);
       });
 
@@ -212,68 +151,81 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         unsubBehaviors();
         unsubObservations();
       };
-    } else if (!currentUser?.uid) {
-      // Sin sesión activa -> Limpiar todo
-      setCourses([]);
-      setActiveCourseId('');
-      setStudents([]);
-      setActivities([]);
-      setSubmissions([]);
-      setAttendanceSessions([]);
-      setBehaviorRecords([]);
-      setObservations([]);
+    } else {
+      // Cargar caché local (vacío por defecto si es usuario nuevo)
+      setCourses(offlineStorage.getLocal('courses', []));
+      setStudents(offlineStorage.getLocal('students', []));
+      setActivities(offlineStorage.getLocal('activities', []));
+      setSubmissions(offlineStorage.getLocal('submissions', []));
+      setAttendanceSessions(offlineStorage.getLocal('attendanceSessions', []));
+      setBehaviorRecords(offlineStorage.getLocal('behaviorRecords', []));
       setIsLoadingData(false);
     }
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, isDemoMode]);
 
-  // Persistir cambios en caché local para soporte offline total ante cierre de la app
-  useEffect(() => {
-    if (currentUser?.uid) {
-      offlineStorage.saveLocal(`courses_${currentUser.uid}`, courses);
-    }
-  }, [courses, currentUser?.uid]);
+  // Persistir cambios en caché local para soporte offline
+  useEffect(() => { offlineStorage.saveLocal('courses', courses); }, [courses]);
+  useEffect(() => { offlineStorage.saveLocal('activeCourseId', activeCourseId); }, [activeCourseId]);
+  useEffect(() => { offlineStorage.saveLocal('students', students); }, [students]);
+  useEffect(() => { offlineStorage.saveLocal('activities', activities); }, [activities]);
+  useEffect(() => { offlineStorage.saveLocal('submissions', submissions); }, [submissions]);
+  useEffect(() => { offlineStorage.saveLocal('attendanceSessions', attendanceSessions); }, [attendanceSessions]);
+  useEffect(() => { offlineStorage.saveLocal('behaviorRecords', behaviorRecords); }, [behaviorRecords]);
+  useEffect(() => { offlineStorage.saveLocal('observations', observations); }, [observations]);
 
+  // Regla del sistema: Si se pasa la fecha límite (dueDate) y la actividad está pendiente o sin entrega,
+  // automáticamente se pasa a 'not_delivered' con nota 1.0 y se guarda en tiempo real.
   useEffect(() => {
-    if (currentUser?.uid) {
-      offlineStorage.saveLocal(`activeCourseId_${currentUser.uid}`, activeCourseId);
-    }
-  }, [activeCourseId, currentUser?.uid]);
+    if (activities.length === 0 || students.length === 0) return;
+    const today = getColombiaDateString();
+    const overdueActivities = activities.filter(a => a.dueDate && a.dueDate < today);
+    if (overdueActivities.length === 0) return;
 
-  useEffect(() => {
-    if (currentUser?.uid) {
-      offlineStorage.saveLocal(`students_${currentUser.uid}`, students);
-    }
-  }, [students, currentUser?.uid]);
+    const teacherId = (!isDemoMode && currentUser?.uid) ? currentUser.uid : 'teacher-demo';
 
-  useEffect(() => {
-    if (currentUser?.uid) {
-      offlineStorage.saveLocal(`activities_${currentUser.uid}`, activities);
-    }
-  }, [activities, currentUser?.uid]);
+    setSubmissions(prev => {
+      let changed = false;
+      const updated = [...prev];
 
-  useEffect(() => {
-    if (currentUser?.uid) {
-      offlineStorage.saveLocal(`submissions_${currentUser.uid}`, submissions);
-    }
-  }, [submissions, currentUser?.uid]);
+      overdueActivities.forEach(act => {
+        const courseStudents = students.filter(s => s.courseId === act.courseId && s.active);
+        courseStudents.forEach(st => {
+          const idx = updated.findIndex(s => s.activityId === act.id && s.studentId === st.id);
+          if (idx === -1) {
+            changed = true;
+            const newSub: Submission = {
+              id: `sub-${st.id}-${act.id}`,
+              activityId: act.id,
+              studentId: st.id,
+              courseId: act.courseId,
+              status: 'not_delivered',
+              grade: 1.0,
+              feedback: 'No entregó dentro del plazo establecido.',
+              submittedAt: new Date().toISOString()
+            };
+            updated.push(newSub);
+            if (!isDemoMode && currentUser?.uid) {
+              setFirestoreDoc('submissions', newSub.id, { ...newSub, teacherId }).catch(console.warn);
+            }
+          } else if (updated[idx].status === 'pending') {
+            changed = true;
+            const modSub: Submission = {
+              ...updated[idx],
+              status: 'not_delivered',
+              grade: updated[idx].grade !== null && updated[idx].grade !== undefined ? updated[idx].grade : 1.0,
+              feedback: updated[idx].feedback || 'No entregó dentro del plazo establecido.'
+            };
+            updated[idx] = modSub;
+            if (!isDemoMode && currentUser?.uid) {
+              setFirestoreDoc('submissions', modSub.id, { ...modSub, teacherId }).catch(console.warn);
+            }
+          }
+        });
+      });
 
-  useEffect(() => {
-    if (currentUser?.uid) {
-      offlineStorage.saveLocal(`attendanceSessions_${currentUser.uid}`, attendanceSessions);
-    }
-  }, [attendanceSessions, currentUser?.uid]);
-
-  useEffect(() => {
-    if (currentUser?.uid) {
-      offlineStorage.saveLocal(`behaviorRecords_${currentUser.uid}`, behaviorRecords);
-    }
-  }, [behaviorRecords, currentUser?.uid]);
-
-  useEffect(() => {
-    if (currentUser?.uid) {
-      offlineStorage.saveLocal(`observations_${currentUser.uid}`, observations);
-    }
-  }, [observations, currentUser?.uid]);
+      return changed ? updated : prev;
+    });
+  }, [activities, students]);
 
   const activeCourse = courses.find(c => c.id === activeCourseId) || courses[0] || null;
 
@@ -299,11 +251,11 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const addCourse = (courseData: Omit<Course, 'id' | 'teacherId' | 'createdAt'>): Course => {
-    if (!currentUser?.uid) throw new Error('Debes iniciar sesión para crear un curso');
-    const teacherId = currentUser.uid;
+    const teacherId = (!isDemoMode && currentUser?.uid) ? currentUser.uid : 'teacher-demo';
     const newCourse: Course = {
       ...courseData,
-      id: `course_${Date.now()}`,
+      institution: courseData.institution || teacherProfile?.institution || 'Institución Educativa',
+      id: `course-${Date.now()}`,
       teacherId,
       studentCount: 0,
       createdAt: new Date().toISOString()
@@ -311,188 +263,131 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setCourses(prev => [...prev, newCourse]);
     setActiveCourseId(newCourse.id);
 
-    setFirestoreDoc('courses', newCourse.id, newCourse).catch(err => {
-      console.warn('Error al guardar curso en Firestore, encolado offline:', err);
-      offlineStorage.addToSyncQueue({ action: 'create', collection: 'courses', data: newCourse });
-    });
+    if (!isDemoMode && currentUser?.uid) {
+      setFirestoreDoc('courses', newCourse.id, newCourse).catch(err => {
+        console.warn('Error al guardar curso en Firestore, encolado offline:', err);
+        offlineStorage.addToSyncQueue({ action: 'create', collection: 'courses', data: newCourse });
+      });
+    }
     return newCourse;
   };
 
   const updateCourse = (courseId: string, updates: Partial<Course>) => {
-    if (!currentUser?.uid) return;
     const updatedPayload = { ...updates, updatedAt: new Date().toISOString() };
-    setCourses(prev => prev.map(c => (c.id === courseId ? { ...c, ...updatedPayload } : c)));
+    setCourses(prev => prev.map(c => c.id === courseId ? { ...c, ...updatedPayload } : c));
 
-    setFirestoreDoc('courses', courseId, updatedPayload).catch(err => {
-      console.warn('Error al actualizar curso en Firestore, encolado offline:', err);
-      offlineStorage.addToSyncQueue({ action: 'update', collection: 'courses', data: { id: courseId, ...updatedPayload } });
-    });
-  };
-
-  const updateAllCoursesInstitution = async (institutionName: string) => {
-    if (!currentUser?.uid || courses.length === 0) return;
-    const cleanInst = institutionName.trim();
-    if (!cleanInst) return;
-
-    setCourses(prev => prev.map(c => ({ ...c, institution: cleanInst })));
-    for (const c of courses) {
-      try {
-        await setFirestoreDoc('courses', c.id, { institution: cleanInst, updatedAt: new Date().toISOString() });
-      } catch (err) {
-        console.warn(`Error actualizando institución para curso ${c.id}:`, err);
-        offlineStorage.addToSyncQueue({
-          action: 'update',
-          collection: 'courses',
-          data: { id: c.id, institution: cleanInst }
-        });
-      }
+    if (!isDemoMode && currentUser?.uid) {
+      setFirestoreDoc('courses', courseId, updatedPayload).catch(err => {
+        console.warn('Error al actualizar curso en Firestore, encolado offline:', err);
+        offlineStorage.addToSyncQueue({ action: 'update', collection: 'courses', data: { id: courseId, ...updatedPayload } });
+      });
     }
   };
 
-  const deleteCourse = async (courseId: string) => {
-    if (!currentUser?.uid) return;
+  const deleteCourse = (courseId: string) => {
     setCourses(prev => prev.filter(c => c.id !== courseId));
-    setStudents(prev => prev.filter(s => s.courseId !== courseId));
     if (activeCourseId === courseId) {
       const remaining = courses.filter(c => c.id !== courseId);
       if (remaining.length > 0) setActiveCourseId(remaining[0].id);
-      else setActiveCourseId('');
     }
 
-    try {
-      await deleteFirestoreDoc('courses', courseId);
-      await deleteStudentsByCourse(courseId, currentUser.uid);
-    } catch (err) {
-      console.warn('Error al eliminar curso en Firestore, encolado offline:', err);
-      offlineStorage.addToSyncQueue({ action: 'delete', collection: 'courses', data: { id: courseId } });
-    }
-  };
-
-  const clearCourseStudents = async (courseId: string): Promise<number> => {
-    if (!currentUser?.uid) return 0;
-    try {
-      const deletedCount = await deleteStudentsByCourse(courseId, currentUser.uid);
-      setStudents(prev => prev.filter(s => s.courseId !== courseId));
-      updateCourse(courseId, { studentCount: 0 });
-      return deletedCount;
-    } catch (err) {
-      console.error('Error vaciando estudiantes del curso en Firestore:', err);
-      throw err;
+    if (!isDemoMode && currentUser?.uid) {
+      deleteFirestoreDoc('courses', courseId).catch(err => {
+        console.warn('Error al eliminar curso en Firestore, encolado offline:', err);
+        offlineStorage.addToSyncQueue({ action: 'delete', collection: 'courses', data: { id: courseId } });
+      });
     }
   };
 
   const addStudent = (studentData: Omit<Student, 'id' | 'uniqueCode' | 'createdAt' | 'active'>): Student => {
-    if (!currentUser?.uid) throw new Error('Debes iniciar sesión para registrar estudiantes');
-    const teacherId = currentUser.uid;
+    const teacherId = (!isDemoMode && currentUser?.uid) ? currentUser.uid : 'teacher-demo';
     const existingCodes = new Set(students.map(s => s.uniqueCode));
     const uniqueCode = generateStudentCode(existingCodes);
     const newStudent: Student = {
       ...studentData,
-      id: `std_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      id: `std-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       uniqueCode,
       active: true,
       createdAt: new Date().toISOString()
     };
-    if (!studentData.documentNumber?.trim()) {
-      delete (newStudent as any).documentNumber;
-    }
     setStudents(prev => [...prev, newStudent]);
 
-    const payload = cleanForFirestore({ ...newStudent, teacherId });
-    setFirestoreDoc('students', newStudent.id, payload).catch(err => {
-      console.warn('Error guardando estudiante en Firestore:', err);
-      offlineStorage.addToSyncQueue({ action: 'create', collection: 'students', data: payload });
-    });
+    if (!isDemoMode && currentUser?.uid) {
+      const payload = { ...newStudent, teacherId };
+      setFirestoreDoc('students', newStudent.id, payload).catch(err => {
+        console.warn('Error guardando estudiante en Firestore:', err);
+        offlineStorage.addToSyncQueue({ action: 'create', collection: 'students', data: payload });
+      });
+    }
     return newStudent;
   };
 
-  const importStudents = async (
-    newStudentsList: { fullName: string; documentNumber?: string }[],
-    replaceExisting: boolean = false
-  ): Promise<number> => {
-    if (!activeCourse || !currentUser?.uid) return 0;
-    const teacherId = currentUser.uid;
-
-    if (replaceExisting) {
-      await deleteStudentsByCourse(activeCourse.id, teacherId);
-      setStudents(prev => prev.filter(s => s.courseId !== activeCourse.id));
-    }
-
-    const currentStudentsInCourse = replaceExisting
-      ? []
-      : students.filter(s => s.courseId === activeCourse.id && s.active);
-
+  const importStudents = (newStudentsList: { fullName: string; documentNumber?: string }[]): number => {
+    if (!activeCourse) return 0;
+    const teacherId = (!isDemoMode && currentUser?.uid) ? currentUser.uid : 'teacher-demo';
     const existingCodes = new Set(students.map(s => s.uniqueCode));
-    const currentMaxListNum = currentStudentsInCourse.reduce((max, s) => Math.max(max, s.listNumber), 0);
-
+    const currentMaxListNum = activeStudents.reduce((max, s) => Math.max(max, s.listNumber), 0);
+    
     const createdList: Student[] = newStudentsList.map((item, index) => {
       const uniqueCode = generateStudentCode(existingCodes);
       existingCodes.add(uniqueCode);
-      const studentObj: Student = {
-        id: `std_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 4)}`,
+      return {
+        id: `std-${Date.now()}-${index}`,
         courseId: activeCourse.id,
         listNumber: currentMaxListNum + index + 1,
         fullName: item.fullName.trim(),
+        documentNumber: item.documentNumber?.trim(),
         uniqueCode,
         active: true,
         createdAt: new Date().toISOString()
       };
-      if (item.documentNumber && item.documentNumber.trim()) {
-        studentObj.documentNumber = item.documentNumber.trim();
-      }
-      return studentObj;
     });
 
-    if (replaceExisting) {
-      setStudents(prev => [...prev.filter(s => s.courseId !== activeCourse.id), ...createdList]);
-    } else {
-      setStudents(prev => [...prev, ...createdList]);
+    setStudents(prev => [...prev, ...createdList]);
+    updateCourse(activeCourse.id, { studentCount: (activeCourse.studentCount || 0) + createdList.length });
+
+    if (!isDemoMode && currentUser?.uid) {
+      batchSaveFirestore('students', createdList.map(s => ({ id: s.id, data: { ...s, teacherId } }))).catch(err => {
+        console.warn('Error guardando lote de estudiantes en Firestore:', err);
+      });
     }
-
-    const newTotal = replaceExisting ? createdList.length : (activeCourse.studentCount || 0) + createdList.length;
-    updateCourse(activeCourse.id, { studentCount: newTotal });
-
-    // Guardar por lotes en Firestore
-    await batchSaveFirestore(
-      'students',
-      createdList.map(s => ({
-        id: s.id,
-        data: cleanForFirestore({ ...s, teacherId })
-      }))
-    );
 
     return createdList.length;
   };
 
   const updateStudent = (studentId: string, updates: Partial<Student>) => {
-    if (!currentUser?.uid) return;
-    setStudents(prev => prev.map(s => (s.id === studentId ? { ...s, ...updates } : s)));
-    const payload = cleanForFirestore(updates);
-    setFirestoreDoc('students', studentId, payload).catch(err => {
-      console.warn('Error actualizando estudiante en Firestore:', err);
-      offlineStorage.addToSyncQueue({ action: 'update', collection: 'students', data: { id: studentId, ...updates } });
-    });
-  };
-
-  const deleteStudent = async (studentId: string) => {
-    if (!currentUser?.uid) return;
-    setStudents(prev => prev.filter(s => s.id !== studentId));
-    if (activeCourse) {
-      updateCourse(activeCourse.id, {
-        studentCount: Math.max(0, (activeCourse.studentCount || 1) - 1)
+    setStudents(prev => prev.map(s => s.id === studentId ? { ...s, ...updates } : s));
+    if (!isDemoMode && currentUser?.uid) {
+      setFirestoreDoc('students', studentId, updates).catch(err => {
+        console.warn('Error actualizando estudiante en Firestore:', err);
+        offlineStorage.addToSyncQueue({ action: 'update', collection: 'students', data: { id: studentId, ...updates } });
       });
     }
-    try {
-      await deleteFirestoreDoc('students', studentId);
-    } catch (err) {
-      console.warn('Error eliminando estudiante en Firestore:', err);
-      offlineStorage.addToSyncQueue({ action: 'delete', collection: 'students', data: { id: studentId } });
+  };
+
+  const deleteStudent = (studentId: string) => {
+    setStudents(prev => prev.map(s => s.id === studentId ? { ...s, active: false } : s));
+    if (!isDemoMode && currentUser?.uid) {
+      setFirestoreDoc('students', studentId, { active: false }).catch(err => {
+        console.warn('Error desactivando estudiante en Firestore:', err);
+      });
     }
   };
 
   const getStudentByCode = (code: string): Student | undefined => {
-    const target = code.trim().toUpperCase();
-    return activeStudents.find(s => s.uniqueCode.toUpperCase() === target);
+    const target = cleanQRCode(code);
+    if (!target) return undefined;
+
+    const matches = (s: Student) => {
+      const uCode = (s.uniqueCode || '').trim().toUpperCase();
+      const doc = (s.documentNumber || '').trim().toUpperCase();
+      const sId = (s.id || '').trim().toUpperCase();
+      return uCode === target || doc === target || sId === target;
+    };
+
+    const inActive = activeStudents.find(matches);
+    if (inActive) return inActive;
+    return students.find(matches);
   };
 
   const getStudentById = (id: string): Student | undefined => {
@@ -500,39 +395,52 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const addActivity = (activityData: Omit<Activity, 'id' | 'createdAt'>): Activity => {
-    if (!currentUser?.uid) throw new Error('Debes iniciar sesión para crear actividades');
-    const teacherId = currentUser.uid;
+    const teacherId = (!isDemoMode && currentUser?.uid) ? currentUser.uid : 'teacher-demo';
     const newAct: Activity = {
       ...activityData,
-      id: `act_${Date.now()}`,
+      id: `act-${Date.now()}`,
       createdAt: new Date().toISOString()
     };
     setActivities(prev => [...prev, newAct]);
 
-    const payload = { ...newAct, teacherId };
-    setFirestoreDoc('activities', newAct.id, payload).catch(err => {
-      console.warn('Error guardando actividad en Firestore:', err);
-      offlineStorage.addToSyncQueue({ action: 'create', collection: 'activities', data: payload });
-    });
+    if (!isDemoMode && currentUser?.uid) {
+      const payload = { ...newAct, teacherId };
+      setFirestoreDoc('activities', newAct.id, payload).catch(err => {
+        console.warn('Error guardando actividad en Firestore:', err);
+        offlineStorage.addToSyncQueue({ action: 'create', collection: 'activities', data: payload });
+      });
+    }
     return newAct;
   };
 
   const updateActivity = (activityId: string, updates: Partial<Activity>) => {
-    if (!currentUser?.uid) return;
-    setActivities(prev => prev.map(a => (a.id === activityId ? { ...a, ...updates } : a)));
-    setFirestoreDoc('activities', activityId, updates).catch(err => {
-      console.warn('Error actualizando actividad en Firestore:', err);
-      offlineStorage.addToSyncQueue({ action: 'update', collection: 'activities', data: { id: activityId, ...updates } });
-    });
+    setActivities(prev => prev.map(a => a.id === activityId ? { ...a, ...updates } : a));
+    if (!isDemoMode && currentUser?.uid) {
+      setFirestoreDoc('activities', activityId, updates).catch(err => {
+        console.warn('Error actualizando actividad en Firestore:', err);
+        offlineStorage.addToSyncQueue({ action: 'update', collection: 'activities', data: { id: activityId, ...updates } });
+      });
+    }
   };
 
   const deleteActivity = (activityId: string) => {
-    if (!currentUser?.uid) return;
     setActivities(prev => prev.filter(a => a.id !== activityId));
-    deleteFirestoreDoc('activities', activityId).catch(err => {
-      console.warn('Error eliminando actividad en Firestore:', err);
-      offlineStorage.addToSyncQueue({ action: 'delete', collection: 'activities', data: { id: activityId } });
-    });
+    // CRÍTICO: Eliminar de inmediato todas las entregas asociadas a la actividad eliminada
+    setSubmissions(prev => prev.filter(s => s.activityId !== activityId));
+
+    if (!isDemoMode && currentUser?.uid) {
+      deleteFirestoreDoc('activities', activityId).catch(err => {
+        console.warn('Error eliminando actividad en Firestore:', err);
+        offlineStorage.addToSyncQueue({ action: 'delete', collection: 'activities', data: { id: activityId } });
+      });
+
+      // Limpiar también las entregas huérfanas en Firestore
+      submissions
+        .filter(s => s.activityId === activityId)
+        .forEach(sub => {
+          deleteFirestoreDoc('submissions', sub.id).catch(console.warn);
+        });
+    }
   };
 
   const recordSubmission = (
@@ -542,26 +450,34 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     grade?: number | null,
     feedback?: string
   ) => {
-    if (!activeCourse || !currentUser?.uid) return;
-    const teacherId = currentUser.uid;
+    if (!activeCourse) return;
+    const teacherId = (!isDemoMode && currentUser?.uid) ? currentUser.uid : 'teacher-demo';
+
+    // Regla del sistema: si se marca no entregado, por defecto la nota es 1.0 (a menos que se especifique otra)
+    let effectiveGrade = grade;
+    if (status === 'not_delivered' && (effectiveGrade === undefined || effectiveGrade === null)) {
+      effectiveGrade = 1.0;
+    }
 
     setSubmissions(prev => {
       const existingIdx = prev.findIndex(s => s.activityId === activityId && s.studentId === studentId);
       const updatedItem: Submission = {
-        id: existingIdx >= 0 ? prev[existingIdx].id : `sub_${studentId}_${activityId}`,
+        id: existingIdx >= 0 ? prev[existingIdx].id : `sub-${studentId}-${activityId}`,
         activityId,
         studentId,
         courseId: activeCourse.id,
         status,
-        grade: grade !== undefined ? grade : existingIdx >= 0 ? prev[existingIdx].grade : null,
-        feedback: feedback !== undefined ? feedback : existingIdx >= 0 ? prev[existingIdx].feedback : '',
+        grade: effectiveGrade !== undefined ? effectiveGrade : (existingIdx >= 0 ? prev[existingIdx].grade : null),
+        feedback: feedback !== undefined ? feedback : (existingIdx >= 0 ? prev[existingIdx].feedback : ''),
         submittedAt: new Date().toISOString()
       };
 
-      setFirestoreDoc('submissions', updatedItem.id, { ...updatedItem, teacherId }).catch(err => {
-        console.warn('Error guardando entrega en Firestore:', err);
-        offlineStorage.addToSyncQueue({ action: 'update', collection: 'submissions', data: { ...updatedItem, teacherId } });
-      });
+      if (!isDemoMode && currentUser?.uid) {
+        setFirestoreDoc('submissions', updatedItem.id, { ...updatedItem, teacherId }).catch(err => {
+          console.warn('Error guardando entrega en Firestore:', err);
+          offlineStorage.addToSyncQueue({ action: 'update', collection: 'submissions', data: { ...updatedItem, teacherId } });
+        });
+      }
 
       if (existingIdx >= 0) {
         const copy = [...prev];
@@ -578,8 +494,8 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     status: AttendanceStatus,
     source: 'qr' | 'manual' = 'manual'
   ) => {
-    if (!activeCourse || !currentUser?.uid) return;
-    const teacherId = currentUser.uid;
+    if (!activeCourse) return;
+    const teacherId = (!isDemoMode && currentUser?.uid) ? currentUser.uid : 'teacher-demo';
 
     setAttendanceSessions(prev => {
       const sessionIdx = prev.findIndex(s => s.courseId === activeCourse.id && s.date === date);
@@ -589,7 +505,7 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         session = { ...prev[sessionIdx] };
       } else {
         session = {
-          id: `att_${activeCourse.id}_${date}`,
+          id: `att-${activeCourse.id}-${date}`,
           courseId: activeCourse.id,
           date,
           period: activeCourse.currentPeriod,
@@ -610,10 +526,7 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       };
 
       // Recalcular resumen
-      let present = 0,
-        absent = 0,
-        late = 0,
-        excused = 0;
+      let present = 0, absent = 0, late = 0, excused = 0;
       Object.values(session.records).forEach(r => {
         if (r.status === 'present') present++;
         else if (r.status === 'absent') absent++;
@@ -631,10 +544,12 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       session.updatedAt = new Date().toISOString();
 
-      setFirestoreDoc('attendanceSessions', session.id, { ...session, teacherId }).catch(err => {
-        console.warn('Error guardando asistencia en Firestore:', err);
-        offlineStorage.addToSyncQueue({ action: 'update', collection: 'attendanceSessions', data: { ...session, teacherId } });
-      });
+      if (!isDemoMode && currentUser?.uid) {
+        setFirestoreDoc('attendanceSessions', session.id, { ...session, teacherId }).catch(err => {
+          console.warn('Error guardando asistencia en Firestore:', err);
+          offlineStorage.addToSyncQueue({ action: 'update', collection: 'attendanceSessions', data: { ...session, teacherId } });
+        });
+      }
 
       if (sessionIdx >= 0) {
         const copy = [...prev];
@@ -647,43 +562,89 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const getTodaySession = (): AttendanceSession | undefined => {
     if (!activeCourse) return undefined;
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateString();
     return activeAttendanceSessions.find(s => s.date === today);
   };
 
   const addBehaviorRecord = (record: Omit<BehaviorRecord, 'id' | 'createdAt'>) => {
-    if (!currentUser?.uid) return;
-    const teacherId = currentUser.uid;
+    const teacherId = (!isDemoMode && currentUser?.uid) ? currentUser.uid : 'teacher-demo';
     const newRecord: BehaviorRecord = {
       ...record,
-      id: `beh_${Date.now()}`,
+      id: `beh-${Date.now()}`,
       createdAt: new Date().toISOString()
     };
     setBehaviorRecords(prev => [newRecord, ...prev]);
 
-    setFirestoreDoc('behaviorRecords', newRecord.id, { ...newRecord, teacherId }).catch(err => {
-      console.warn('Error guardando comportamiento en Firestore:', err);
-      offlineStorage.addToSyncQueue({ action: 'create', collection: 'behaviorRecords', data: { ...newRecord, teacherId } });
-    });
+    if (!isDemoMode && currentUser?.uid) {
+      setFirestoreDoc('behaviorRecords', newRecord.id, { ...newRecord, teacherId }).catch(err => {
+        console.warn('Error guardando comportamiento en Firestore:', err);
+        offlineStorage.addToSyncQueue({ action: 'create', collection: 'behaviorRecords', data: { ...newRecord, teacherId } });
+      });
+    }
   };
 
   const addObservation = (studentId: string, text: string) => {
-    if (!activeCourse || !currentUser?.uid) return;
-    const teacherId = currentUser.uid;
+    if (!activeCourse) return;
+    const teacherId = (!isDemoMode && currentUser?.uid) ? currentUser.uid : 'teacher-demo';
     const newObs: StudentObservation = {
-      id: `obs_${Date.now()}`,
+      id: `obs-${Date.now()}`,
       courseId: activeCourse.id,
       studentId,
-      date: new Date().toISOString().split('T')[0],
+      date: getLocalDateString(),
       text,
       createdAt: new Date().toISOString()
     };
     setObservations(prev => [newObs, ...prev]);
 
-    setFirestoreDoc('observations', newObs.id, { ...newObs, teacherId }).catch(err => {
-      console.warn('Error guardando observación en Firestore:', err);
-      offlineStorage.addToSyncQueue({ action: 'create', collection: 'observations', data: { ...newObs, teacherId } });
-    });
+    if (!isDemoMode && currentUser?.uid) {
+      setFirestoreDoc('observations', newObs.id, { ...newObs, teacherId }).catch(err => {
+        console.warn('Error guardando observación en Firestore:', err);
+        offlineStorage.addToSyncQueue({ action: 'create', collection: 'observations', data: { ...newObs, teacherId } });
+      });
+    }
+  };
+
+  const clearAllData = () => {
+    setCourses([]);
+    setActiveCourseId('');
+    setStudents([]);
+    setActivities([]);
+    setSubmissions([]);
+    setAttendanceSessions([]);
+    setBehaviorRecords([]);
+    setObservations([]);
+    offlineStorage.clearAllLocal();
+  };
+
+  const resetToDemoData = () => {
+    setCourses(DEMO_COURSES);
+    setActiveCourseId(DEMO_COURSES[0].id);
+    setStudents(DEMO_STUDENTS);
+    setActivities(DEMO_ACTIVITIES);
+    setSubmissions(DEMO_SUBMISSIONS);
+    setAttendanceSessions(DEMO_ATTENDANCE_SESSIONS);
+    setBehaviorRecords(DEMO_BEHAVIORS);
+    setObservations([]);
+  };
+
+  // Copia la estructura demo inicial a Firestore para el nuevo usuario docente
+  const seedDemoToFirestore = async () => {
+    if (!currentUser?.uid || !isFirestoreReady()) return;
+    const uid = currentUser.uid;
+
+    const seededCourses = DEMO_COURSES.map(c => ({ id: c.id, data: { ...c, teacherId: uid } }));
+    const seededStudents = DEMO_STUDENTS.map(s => ({ id: s.id, data: { ...s, teacherId: uid } }));
+    const seededActs = DEMO_ACTIVITIES.map(a => ({ id: a.id, data: { ...a, teacherId: uid } }));
+    const seededSubs = DEMO_SUBMISSIONS.map(s => ({ id: s.id, data: { ...s, teacherId: uid } }));
+    const seededAtt = DEMO_ATTENDANCE_SESSIONS.map(att => ({ id: att.id, data: { ...att, teacherId: uid } }));
+    const seededBeh = DEMO_BEHAVIORS.map(b => ({ id: b.id, data: { ...b, teacherId: uid } }));
+
+    await batchSaveFirestore('courses', seededCourses);
+    await batchSaveFirestore('students', seededStudents);
+    await batchSaveFirestore('activities', seededActs);
+    await batchSaveFirestore('submissions', seededSubs);
+    await batchSaveFirestore('attendanceSessions', seededAtt);
+    await batchSaveFirestore('behaviorRecords', seededBeh);
   };
 
   return (
@@ -701,11 +662,9 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         selectCourse,
         addCourse,
         updateCourse,
-        updateAllCoursesInstitution,
         deleteCourse,
         addStudent,
         importStudents,
-        clearCourseStudents,
         updateStudent,
         deleteStudent,
         getStudentByCode,
@@ -717,7 +676,10 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         recordAttendance,
         getTodaySession,
         addBehaviorRecord,
-        addObservation
+        addObservation,
+        clearAllData,
+        resetToDemoData,
+        seedDemoToFirestore
       }}
     >
       {children}

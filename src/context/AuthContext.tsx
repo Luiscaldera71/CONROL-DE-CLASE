@@ -1,133 +1,83 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { TeacherProfile, TeacherSettings } from '../types';
+import { TeacherProfile } from '../types';
+import { DEMO_TEACHER } from '../services/mockData';
 import { auth, isFirebaseConfigured } from '../services/firebase';
-import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut,
-  sendPasswordResetEmail,
-  updateProfile,
-  User
-} from 'firebase/auth';
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { getTeacherProfileFirestore, saveTeacherProfileFirestore } from '../services/firestoreService';
-import { offlineStorage } from '../services/offlineStorage';
-
-export const DEFAULT_TEACHER_SETTINGS: TeacherSettings = {
-  gradeScale: {
-    min: 0.0,
-    max: 5.0,
-    passingGrade: 3.0
-  },
-  riskThresholds: {
-    minGrade: 3.0,
-    minAttendanceRate: 75,
-    maxUnsubmitted: 3
-  },
-  periods: ['Periodo 1', 'Periodo 2', 'Periodo 3', 'Periodo 4'],
-  behaviorCategories: [
-    { id: 'warning', label: 'Llamado de Atención', type: 'negative' },
-    { id: 'non_compliance', label: 'Incumplimiento', type: 'negative' },
-    { id: 'positive', label: 'Aporte Destacado', type: 'positive' },
-    { id: 'recognition', label: 'Reconocimiento', type: 'positive' }
-  ]
-};
 
 interface AuthContextType {
-  currentUser: User | null;
+  currentUser: any;
   teacherProfile: TeacherProfile | null;
   loading: boolean;
+  isDemoMode: boolean;
   isAuthModalOpen: boolean;
   openAuthModal: () => void;
   closeAuthModal: () => void;
   login: (email: string, pass: string) => Promise<void>;
-  register: (email: string, pass: string, name: string, institution: string, subject?: string) => Promise<void>;
-  resetPassword: (email: string) => Promise<void>;
+  register: (email: string, pass: string, name: string, institution: string) => Promise<void>;
   logout: () => Promise<void>;
+  enableDemoMode: () => void;
   updateSettings: (newSettings: Partial<TeacherProfile['settings']>) => Promise<void>;
-  updateTeacherProfile: (updates: {
-    displayName?: string;
-    institution?: string;
-    subject?: string;
-    phone?: string;
-  }) => Promise<void>;
+  updateProfile: (updates: Partial<TeacherProfile>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Restaurar usuario previo de almacenamiento local para permitir entrada 100% offline sin esperas
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    return offlineStorage.getLocal<any>('cached_auth_user', null);
-  });
-  const [teacherProfile, setTeacherProfile] = useState<TeacherProfile | null>(() =>
-    offlineStorage.getLocal<TeacherProfile | null>('teacher_profile', null)
-  );
-  // Si ya tenemos un usuario en caché, NUNCA bloquear con pantalla de carga
-  const [loading, setLoading] = useState<boolean>(() => {
-    const cached = offlineStorage.getLocal<any>('cached_auth_user', null);
-    return !cached;
-  });
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+const LOCAL_USER_KEY = 'aulacontrol_logged_user';
 
-  // Timeout de seguridad: Si no hay conexión o tarda, quitar pantalla de carga en máximo 1.2 segundos
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setLoading(false);
-    }, 1200);
-    return () => clearTimeout(timer);
-  }, []);
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [teacherProfile, setTeacherProfile] = useState<TeacherProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [isDemoMode, setIsDemoMode] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   useEffect(() => {
     if (isFirebaseConfigured && auth) {
       const unsubscribe = onAuthStateChanged(auth, async (user) => {
         if (user) {
-          const authUserObj = {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName
-          } as any;
-          setCurrentUser(authUserObj);
-          offlineStorage.saveLocal('cached_auth_user', authUserObj);
-          setLoading(false);
-
-          try {
-            let savedProfile = await getTeacherProfileFirestore(user.uid);
-            if (!savedProfile) {
-              const cached = offlineStorage.getLocal<TeacherProfile | null>('teacher_profile', null);
-              if (cached && cached.uid === user.uid) {
-                savedProfile = cached;
-              } else {
-                const initialProfile: TeacherProfile = {
-                  uid: user.uid,
-                  email: user.email || '',
-                  displayName: user.displayName || 'Docente',
-                  institution: 'Institución Educativa',
-                  createdAt: new Date().toISOString(),
-                  settings: DEFAULT_TEACHER_SETTINGS
-                };
-                saveTeacherProfileFirestore(initialProfile);
-                savedProfile = initialProfile;
-              }
-            }
+          setCurrentUser(user);
+          setIsDemoMode(false);
+          const savedProfile = await getTeacherProfileFirestore(user.uid);
+          if (savedProfile) {
             setTeacherProfile(savedProfile);
-            offlineStorage.saveLocal('teacher_profile', savedProfile);
-          } catch (err) {
-            console.warn('Error cargando perfil docente de Firestore (usando caché offline):', err);
+          } else {
+            const initialProfile: TeacherProfile = {
+              uid: user.uid,
+              email: user.email || '',
+              displayName: user.displayName || 'Docente',
+              institution: 'Institución Educativa',
+              createdAt: new Date().toISOString(),
+              settings: DEMO_TEACHER.settings
+            };
+            await saveTeacherProfileFirestore(initialProfile);
+            setTeacherProfile(initialProfile);
           }
         } else {
-          // Solo si estamos conectados con internet confirmamos el cierre de sesión en Firebase
-          if (navigator.onLine) {
-            setCurrentUser(null);
-            setTeacherProfile(null);
-            offlineStorage.saveLocal('cached_auth_user', null);
-            offlineStorage.saveLocal('teacher_profile', null);
-          }
-          setLoading(false);
+          // No hay usuario activo en Firebase
+          setCurrentUser(null);
+          setTeacherProfile(null);
+          setIsDemoMode(false);
         }
+        setLoading(false);
       });
       return unsubscribe;
     } else {
+      // Modo local/offline sin Firebase obligatorio
+      try {
+        const savedSession = localStorage.getItem(LOCAL_USER_KEY);
+        if (savedSession) {
+          const parsed = JSON.parse(savedSession);
+          setCurrentUser(parsed.user);
+          setTeacherProfile(parsed.profile);
+        } else {
+          setCurrentUser(null);
+          setTeacherProfile(null);
+        }
+      } catch {
+        setCurrentUser(null);
+        setTeacherProfile(null);
+      }
       setLoading(false);
     }
   }, []);
@@ -136,88 +86,85 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const closeAuthModal = () => setIsAuthModalOpen(false);
 
   const login = async (email: string, pass: string) => {
-    if (!auth) throw new Error('Firebase Auth no está disponible.');
-    const res = await signInWithEmailAndPassword(auth, email.trim(), pass);
-    const authUserObj = {
-      uid: res.user.uid,
-      email: res.user.email,
-      displayName: res.user.displayName
-    } as any;
-    setCurrentUser(authUserObj);
-    offlineStorage.saveLocal('cached_auth_user', authUserObj);
-
-    let profile = await getTeacherProfileFirestore(res.user.uid);
-    if (!profile) {
-      profile = {
-        uid: res.user.uid,
-        email: res.user.email || email.trim(),
-        displayName: res.user.displayName || 'Docente',
+    if (isFirebaseConfigured && auth) {
+      const res = await signInWithEmailAndPassword(auth, email, pass);
+      setCurrentUser(res.user);
+      setIsDemoMode(false);
+      const profile = await getTeacherProfileFirestore(res.user.uid);
+      if (profile) setTeacherProfile(profile);
+      setIsAuthModalOpen(false);
+    } else {
+      const localUser = { uid: `user-${Date.now()}`, email };
+      const localProfile: TeacherProfile = {
+        uid: localUser.uid,
+        email,
+        displayName: email.split('@')[0],
         institution: 'Institución Educativa',
         createdAt: new Date().toISOString(),
-        settings: DEFAULT_TEACHER_SETTINGS
+        settings: DEMO_TEACHER.settings
       };
-      await saveTeacherProfileFirestore(profile);
+      localStorage.setItem(LOCAL_USER_KEY, JSON.stringify({ user: localUser, profile: localProfile }));
+      setCurrentUser(localUser);
+      setTeacherProfile(localProfile);
+      setIsDemoMode(false);
+      setIsAuthModalOpen(false);
     }
-    setTeacherProfile(profile);
-    offlineStorage.saveLocal('teacher_profile', profile);
-    setIsAuthModalOpen(false);
   };
 
-  const register = async (email: string, pass: string, name: string, institution: string, subject?: string) => {
-    if (!auth) throw new Error('Firebase Auth no está disponible.');
-    const cred = await createUserWithEmailAndPassword(auth, email.trim(), pass);
-
-    try {
-      await updateProfile(cred.user, { displayName: name.trim() });
-    } catch (e) {
-      console.warn('No se pudo actualizar displayName en Auth:', e);
+  const register = async (email: string, pass: string, name: string, institution: string) => {
+    if (isFirebaseConfigured && auth) {
+      const cred = await createUserWithEmailAndPassword(auth, email, pass);
+      const newProfile: TeacherProfile = {
+        uid: cred.user.uid,
+        email,
+        displayName: name,
+        institution: institution || 'Institución Educativa',
+        createdAt: new Date().toISOString(),
+        settings: DEMO_TEACHER.settings
+      };
+      await saveTeacherProfileFirestore(newProfile);
+      setCurrentUser(cred.user);
+      setTeacherProfile(newProfile);
+      setIsDemoMode(false);
+      setIsAuthModalOpen(false);
+    } else {
+      const localUser = { uid: `user-${Date.now()}`, email };
+      const localProfile: TeacherProfile = {
+        uid: localUser.uid,
+        email,
+        displayName: name || email.split('@')[0],
+        institution: institution || 'Institución Educativa',
+        createdAt: new Date().toISOString(),
+        settings: DEMO_TEACHER.settings
+      };
+      localStorage.setItem(LOCAL_USER_KEY, JSON.stringify({ user: localUser, profile: localProfile }));
+      setCurrentUser(localUser);
+      setTeacherProfile(localProfile);
+      setIsDemoMode(false);
+      setIsAuthModalOpen(false);
     }
-
-    const authUserObj = {
-      uid: cred.user.uid,
-      email: cred.user.email,
-      displayName: name.trim()
-    } as any;
-    setCurrentUser(authUserObj);
-    offlineStorage.saveLocal('cached_auth_user', authUserObj);
-
-    const newProfile: TeacherProfile = {
-      uid: cred.user.uid,
-      email: email.trim(),
-      displayName: name.trim(),
-      institution: institution.trim() || 'Institución Educativa',
-      subject: subject?.trim() || undefined,
-      createdAt: new Date().toISOString(),
-      settings: DEFAULT_TEACHER_SETTINGS
-    };
-
-    await saveTeacherProfileFirestore(newProfile);
-    setTeacherProfile(newProfile);
-    offlineStorage.saveLocal('teacher_profile', newProfile);
-    setIsAuthModalOpen(false);
-  };
-
-  const resetPassword = async (email: string) => {
-    if (!auth) throw new Error('Firebase no está configurado para envío de correos.');
-    await sendPasswordResetEmail(auth, email.trim());
   };
 
   const logout = async () => {
-    offlineStorage.saveLocal('cached_auth_user', null);
-    offlineStorage.saveLocal('teacher_profile', null);
+    if (isFirebaseConfigured && auth) {
+      await signOut(auth);
+    }
+    localStorage.removeItem(LOCAL_USER_KEY);
     setCurrentUser(null);
     setTeacherProfile(null);
-    if (auth) {
-      try {
-        await signOut(auth);
-      } catch (err) {
-        console.error('Error al cerrar sesión:', err);
-      }
-    }
+    setIsDemoMode(false);
+  };
+
+  const enableDemoMode = () => {
+    setIsDemoMode(true);
+    const demoUser = { uid: DEMO_TEACHER.uid, email: DEMO_TEACHER.email };
+    setCurrentUser(demoUser);
+    setTeacherProfile(DEMO_TEACHER);
+    setIsAuthModalOpen(false);
   };
 
   const updateSettings = async (newSettings: Partial<TeacherProfile['settings']>) => {
-    if (!teacherProfile || !currentUser?.uid) return;
+    if (!teacherProfile) return;
     const updated = {
       ...teacherProfile,
       settings: {
@@ -226,38 +173,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
     setTeacherProfile(updated);
-    await saveTeacherProfileFirestore(updated);
+    if (!isDemoMode && currentUser?.uid && isFirebaseConfigured) {
+      await saveTeacherProfileFirestore(updated);
+    } else if (currentUser) {
+      localStorage.setItem(LOCAL_USER_KEY, JSON.stringify({ user: currentUser, profile: updated }));
+    }
   };
 
-  const updateTeacherProfile = async (updates: {
-    displayName?: string;
-    institution?: string;
-    subject?: string;
-    phone?: string;
-  }) => {
-    if (!teacherProfile || !currentUser?.uid) return;
+  const updateProfile = async (updates: Partial<TeacherProfile>) => {
+    if (!teacherProfile) return;
     const updated: TeacherProfile = {
       ...teacherProfile,
-      ...updates
+      ...updates,
+      settings: updates.settings
+        ? { ...teacherProfile.settings, ...updates.settings }
+        : teacherProfile.settings
     };
     setTeacherProfile(updated);
-    offlineStorage.saveLocal('teacher_profile', updated);
-
-    if (updates.displayName && auth?.currentUser) {
-      try {
-        await updateProfile(auth.currentUser, { displayName: updates.displayName });
-        const updatedAuthUser = {
-          ...currentUser,
-          displayName: updates.displayName
-        };
-        setCurrentUser(updatedAuthUser);
-        offlineStorage.saveLocal('cached_auth_user', updatedAuthUser);
-      } catch (e) {
-        console.warn('Error al actualizar displayName en Auth:', e);
-      }
+    if (!isDemoMode && currentUser?.uid && isFirebaseConfigured) {
+      await saveTeacherProfileFirestore(updated);
+    } else if (currentUser) {
+      localStorage.setItem(LOCAL_USER_KEY, JSON.stringify({ user: currentUser, profile: updated }));
     }
-
-    await saveTeacherProfileFirestore(updated);
   };
 
   return (
@@ -266,15 +203,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentUser,
         teacherProfile,
         loading,
+        isDemoMode,
         isAuthModalOpen,
         openAuthModal,
         closeAuthModal,
         login,
         register,
-        resetPassword,
         logout,
+        enableDemoMode,
         updateSettings,
-        updateTeacherProfile
+        updateProfile
       }}
     >
       {children}

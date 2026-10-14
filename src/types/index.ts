@@ -23,10 +23,14 @@ export interface TeacherProfile {
   email: string;
   displayName: string;
   institution: string;
-  subject?: string;         // e.g. "Tecnología e Informática", "Matemáticas"
-  phone?: string;
   createdAt: string;
   settings: TeacherSettings;
+}
+
+export interface ComponentWeights {
+  academic: number;   // e.g. 0.85 (85%)
+  attendance: number; // e.g. 0.15 (15%)
+  behavior?: number;  // opcional
 }
 
 export interface Course {
@@ -40,9 +44,24 @@ export interface Course {
   shift: string;            // e.g. "Mañana" | "Tarde"
   subject: string;          // e.g. "Tecnología e Informática"
   currentPeriod: string;    // e.g. "Periodo 1"
+  scheduleTime?: string;    // e.g. "07:30" (Hora de inicio de la clase)
+  scheduleEndTime?: string; // e.g. "08:30" (Hora de fin de la clase)
+  scheduleDays?: string[];  // e.g. ["Lunes", "Miércoles", "Viernes"]
   studentCount?: number;
+  componentWeights?: ComponentWeights;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface AppNotification {
+  id: string;
+  type: 'class_reminder' | 'activity_due' | 'system';
+  title: string;
+  message: string;
+  courseName?: string;
+  activityId?: string;
+  timestamp: number;
+  read: boolean;
 }
 
 export interface Student {
@@ -127,7 +146,6 @@ export interface BehaviorRecord {
   severity: 'low' | 'medium' | 'high';
   title: string;
   description: string;
-  points?: number; // Puntos de mérito o demérito (e.g. -1.0, -0.5, +1.0)
   observation?: string;
   createdAt: string;
 }

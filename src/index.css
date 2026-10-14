@@ -2,15 +2,31 @@
 
 :root {
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  color-scheme: dark;
+  color-scheme: light;
+
+  /* AbsenSiswa Theme Tokens */
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-light: #eff6ff;
+  --surface: #ffffff;
+  --background: #f5f7fb;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --border: #e2e8f0;
 }
 
 body {
   margin: 0;
   padding: 0;
+  background-color: #f5f7fb;
+  color: #0f172a;
   -webkit-tap-highlight-color: transparent;
-  user-select: none;
-  -webkit-touch-callout: none;
+  touch-action: manipulation;
+  overflow-x: hidden;
+}
+
+button, a, input, textarea, select, [role="button"], [role="switch"] {
+  touch-action: manipulation;
 }
 
 input, textarea, select {
@@ -23,14 +39,14 @@ input, textarea, select {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0f172a;
+  background: #f1f5f9;
 }
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: #cbd5e1;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #94a3b8;
 }
 
 /* Print Styles for QR Carnés A4 */
@@ -54,3 +70,218 @@ input, textarea, select {
     color: black !important;
   }
 }
+
+/* Background Canvas */
+.liquid-bg {
+  background-color: #f5f7fb;
+  background-image: 
+    radial-gradient(at 10% 10%, rgba(219, 234, 254, 0.45) 0px, transparent 40%),
+    radial-gradient(at 90% 90%, rgba(224, 231, 255, 0.35) 0px, transparent 40%);
+  background-repeat: no-repeat;
+  background-attachment: scroll;
+}
+
+/* Esferas de fondo desactivadas para máxima fluidez y respuesta táctil en Android/Móviles */
+.liquid-orb-1,
+.liquid-orb-2,
+.liquid-orb-3 {
+  display: none !important;
+}
+
+/* Tarjetas Limpias Estilo AbsenSiswa */
+.clean-card,
+.liquid-glass {
+  background-color: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 1.25rem;
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.04), 0 1px 2px -1px rgba(15, 23, 42, 0.04) !important;
+  color: #0f172a !important;
+}
+
+.clean-card-hover,
+.liquid-glass-hover {
+  background-color: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 1.25rem;
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.04) !important;
+  color: #0f172a !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.clean-card-hover:hover,
+.liquid-glass-hover:hover {
+  border-color: #bfdbfe !important;
+  box-shadow: 0 8px 24px -4px rgba(37, 99, 235, 0.08) !important;
+  transform: translateY(-2px);
+}
+
+.clean-card-hover:active,
+.liquid-glass-hover:active {
+  transform: scale(0.98);
+}
+
+.clean-card-active,
+.liquid-glass-active {
+  background-color: #eff6ff !important;
+  border: 1px solid #93c5fd !important;
+  color: #1d4ed8 !important;
+}
+
+/* Botones Estilo AbsenSiswa */
+.btn-primary,
+.liquid-button {
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+  border: 1px solid #2563eb !important;
+  border-radius: 1rem;
+  font-weight: 700;
+  box-shadow: 0 4px 14px -2px rgba(37, 99, 235, 0.35) !important;
+  transition: all 0.18s ease;
+  touch-action: manipulation;
+}
+
+.btn-primary:hover,
+.liquid-button:hover {
+  background-color: #1d4ed8 !important;
+  border-color: #1d4ed8 !important;
+  box-shadow: 0 6px 18px -2px rgba(37, 99, 235, 0.45) !important;
+}
+
+.btn-primary:active,
+.liquid-button:active {
+  transform: scale(0.97);
+}
+
+.btn-secondary {
+  background-color: #eff6ff !important;
+  color: #1d4ed8 !important;
+  border: 1px solid #dbeafe !important;
+  border-radius: 1rem;
+  font-weight: 700;
+  transition: all 0.18s ease;
+}
+
+.btn-secondary:hover {
+  background-color: #dbeafe !important;
+}
+
+/* Campos de entrada limpios con fondo blanco */
+.clean-input,
+.liquid-input {
+  background-color: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 1rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+  color: #0f172a !important;
+  transition: all 0.2s ease;
+}
+
+.clean-input:focus,
+.liquid-input:focus {
+  background-color: #ffffff !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
+  outline: none;
+}
+
+/* Píldoras de estado AbsenSiswa */
+.pill-present {
+  background-color: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+  font-weight: 700;
+}
+
+.pill-sick,
+.pill-late {
+  background-color: #fffbeb;
+  color: #d97706;
+  border: 1px solid #fde68a;
+  font-weight: 700;
+}
+
+.pill-absent {
+  background-color: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  font-weight: 700;
+}
+
+.pill-excused {
+  background-color: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+  font-weight: 700;
+}
+
+/* Android & Mobile Native Safe Area handling */
+.safe-top-padding {
+  padding-top: max(1rem, env(safe-area-inset-top));
+}
+.safe-bottom-padding {
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+}
+
+/* Animaciones sutiles */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ========================================================
+   ESTILOS DE IMPRESIÓN PROFESIONAL (TAMAÑO CARTA / LETTER)
+   ======================================================== */
+@page {
+  size: letter portrait;
+  margin: 10mm 8mm;
+}
+
+@media print {
+  html,
+  body,
+  #root,
+  .flex-1,
+  main {
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    position: static !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Ocultar barra lateral, cabecera de la app, tabs móviles y elementos no imprimibles */
+  aside,
+  header,
+  nav,
+  .no-print,
+  .TabBar,
+  [role="navigation"] {
+    display: none !important;
+  }
+
+  /* Cuadrícula de 2 columnas en tamaño Carta */
+  .print-cards-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8mm 8mm !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Cada carné evita romperse entre páginas */
+  .print-card {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    box-shadow: none !important;
+    border: 1px dashed #64748b !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+}
+

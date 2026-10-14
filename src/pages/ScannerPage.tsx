@@ -4,13 +4,11 @@ import {
   Camera,
   Flashlight,
   FlashlightOff,
-  SwitchCamera,
   RefreshCw,
   Zap,
   Search,
   CheckCircle,
   AlertCircle,
-  Volume2,
   X,
   Users
 } from 'lucide-react';
@@ -18,10 +16,11 @@ import { useCourse } from '../context/CourseContext';
 import { useToast } from '../context/ToastContext';
 import { Student } from '../types';
 import { cleanQRCode, playFeedbackTone, triggerHapticFeedback } from '../utils/codeGenerator';
+import { getLocalDateString } from '../utils/dateUtils';
 import { QuickActionModal } from '../components/qr/QuickActionModal';
 
 export const ScannerPage: React.FC = () => {
-  const { students, activeCourse, getStudentByCode, recordAttendance, getTodaySession } = useCourse();
+  const { students, courses, activeCourse, selectCourse, getStudentByCode, recordAttendance, getTodaySession } = useCourse();
   const { showToast } = useToast();
 
   const [isScanning, setIsScanning] = useState(false);
@@ -48,7 +47,7 @@ export const ScannerPage: React.FC = () => {
   const lastScannedTimeRef = useRef<number>(0);
   const lastScannedCodeRef = useRef<string>('');
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = getLocalDateString();
 
   useEffect(() => {
     startCamera();
@@ -68,23 +67,22 @@ export const ScannerPage: React.FC = () => {
         { facingMode: 'environment' },
         {
           fps: 15,
-          qrbox: { width: 260, height: 260 },
+          qrbox: { width: 250, height: 250 },
           aspectRatio: 1.0
         },
         onScanSuccess,
-        () => {} // Ignorar errores de frames continuos
+        () => {} // Ignorar frames vacíos
       );
 
       setIsScanning(true);
 
-      // Chequear soporte de flash/torch
       try {
         const capabilities = (html5QrCodeRef.current as any).getRunningTrackCapabilities();
         if (capabilities && capabilities.torch) {
           setTorchSupported(true);
         }
       } catch {
-        // Torch no soportado en este dispositivo
+        // Torch no soportado
       }
     } catch (err: any) {
       console.warn('Error iniciando cámara:', err);
@@ -113,15 +111,17 @@ export const ScannerPage: React.FC = () => {
       });
       setTorchOn(nextState);
     } catch {
-      showToast('Tu cámara no soporta control de linterna', 'info');
+      showToast('Tu cámara no soporta linterna', 'info');
     }
   };
 
   const onScanSuccess = (decodedText: string) => {
     const now = Date.now();
+    // Extraer infaliblemente sólo el código del estudiante (ignorar el link de Vercel)
     const cleanCode = cleanQRCode(decodedText);
 
-    // Evitar lecturas duplicadas en menos de 1.8 segundos del mismo código
+    if (!cleanCode) return;
+
     if (cleanCode === lastScannedCodeRef.current && now - lastScannedTimeRef.current < 1800) {
       return;
     }
@@ -129,20 +129,22 @@ export const ScannerPage: React.FC = () => {
     lastScannedTimeRef.current = now;
     lastScannedCodeRef.current = cleanCode;
 
-    // Buscar estudiante en el curso activo
     const found = getStudentByCode(cleanCode);
 
     if (!found) {
       playFeedbackTone('alert');
-      showToast(`Código ${cleanCode} no pertenece a ${activeCourse?.name || 'este curso'}`, 'warning');
+      showToast(`Código ${cleanCode} no encontrado en tus cursos`, 'warning');
       return;
     }
 
-    // Feedback sensorial
+    // Si el estudiante pertenece a un curso distinto al activo, cambiar de curso automáticamente
+    if (activeCourse && found.courseId !== activeCourse.id) {
+      selectCourse(found.courseId);
+    }
+
     triggerHapticFeedback();
 
     if (isRapidMode) {
-      // MODO ASISTENCIA RÁPIDA: Marca presente de inmediato y continúa
       playFeedbackTone('rapid');
       recordAttendance(today, found.id, 'present', 'qr');
       setRapidSessionStats(prev => ({
@@ -152,7 +154,6 @@ export const ScannerPage: React.FC = () => {
       }));
       showToast(`✓ Presente: #${found.listNumber} ${found.fullName}`, 'success');
     } else {
-      // MODO NORMAL: Abre modal de opciones
       playFeedbackTone('success');
       setScannedStudent(found);
     }
@@ -187,15 +188,16 @@ export const ScannerPage: React.FC = () => {
 
   return (
     <div className="max-w-md mx-auto space-y-4">
-      {/* HEADER DE LA PANTALLA */}
+      {/* ========================================================
+          CABECERA DE CHECK IN (Estilo AbsenSiswa Screen 4)
+         ======================================================== */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg md:text-xl font-bold text-white flex items-center gap-2">
-            <Camera className="w-5 h-5 text-brand-400" />
-            <span>Escáner de Aula</span>
+          <h1 className="text-xl font-black text-slate-900 tracking-tight">
+            Check In / Escanear QR
           </h1>
-          <p className="text-xs text-slate-400">
-            Curso: <strong className="text-slate-200">{activeCourse?.name}</strong> ({students.length} estudiantes)
+          <p className="text-xs text-slate-500">
+            Curso: <strong className="text-slate-800">{activeCourse?.name}</strong> ({students.length} alumnos)
           </p>
         </div>
 
@@ -204,96 +206,119 @@ export const ScannerPage: React.FC = () => {
           onClick={() => setIsRapidMode(!isRapidMode)}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
             isRapidMode
-              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-              : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'
+              ? 'bg-emerald-50 text-emerald-700 border border-emerald-300'
+              : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
           }`}
         >
-          <Zap className={`w-3.5 h-3.5 ${isRapidMode ? 'text-emerald-400' : ''}`} />
-          <span>{isRapidMode ? 'Asistencia Rápida ON' : 'Modo Normal'}</span>
+          <Zap className={`w-3.5 h-3.5 ${isRapidMode ? 'text-emerald-600' : 'text-slate-400'}`} />
+          <span>{isRapidMode ? 'Rápido ON' : 'Normal'}</span>
         </button>
       </div>
 
-      {/* BANNER INFORMATIVO MODO RÁPIDO */}
+      {/* BANNER MODO RÁPIDO */}
       {isRapidMode && (
-        <div className="bg-emerald-950/40 border border-emerald-500/30 p-3 rounded-2xl flex items-center justify-between animate-in fade-in duration-150">
+        <div className="bg-emerald-50 border border-emerald-200 p-3.5 rounded-2xl flex items-center justify-between animate-in fade-in duration-150">
           <div>
-            <span className="text-xs font-bold text-emerald-300 block">Modo Pase de Lista Continuo</span>
-            <span className="text-[11px] text-emerald-200/80">
-              {rapidSessionStats.lastStudentName ? `Último: ${rapidSessionStats.lastStudentName}` : 'Apunta a los carnés uno tras otro'}
+            <span className="text-xs font-bold text-emerald-800 block">Modo Escaneo Continuo</span>
+            <span className="text-[11px] text-emerald-700">
+              {rapidSessionStats.lastStudentName ? `Último: ${rapidSessionStats.lastStudentName}` : 'Apunta a los carnés QR uno tras otro'}
             </span>
           </div>
           <button
             onClick={finishRapidSession}
-            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md active:scale-95"
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm"
           >
-            Finalizar Lista
+            Finalizar
           </button>
         </div>
       )}
 
-      {/* ÁREA DE VISOR DE CÁMARA */}
-      <div className="relative bg-black rounded-3xl overflow-hidden aspect-square border-2 border-slate-800 shadow-2xl flex items-center justify-center">
-        {/* Contenedor del video HTML5 QR */}
-        <div id="qr-reader-container" className="w-full h-full object-cover"></div>
+      {/* ========================================================
+          ÁREA DEL VISOR QR (Marco Limpio con esquinas azules)
+         ======================================================== */}
+      <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-4">
+        <div className="relative bg-slate-900 rounded-3xl overflow-hidden aspect-square flex items-center justify-center shadow-inner">
+          {/* Contenedor del video HTML5 QR */}
+          <div id="qr-reader-container" className="w-full h-full object-cover"></div>
 
-        {/* Recuadro visual animado de enfoque */}
-        {isScanning && (
-          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-            <div className="w-64 h-64 border-2 border-brand-400/80 rounded-3xl relative animate-pulse shadow-[0_0_20px_rgba(99,102,241,0.25)]">
-              {/* Esquinas destacadas */}
-              <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-brand-400 rounded-tl-xl"></div>
-              <div className="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-brand-400 rounded-tr-xl"></div>
-              <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-brand-400 rounded-bl-xl"></div>
-              <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-brand-400 rounded-br-xl"></div>
+          {/* Recuadro visual de enfoque con esquinas azules AbsenSiswa */}
+          {isScanning && (
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+              <div className="w-60 h-60 border-2 border-blue-500/60 rounded-3xl relative animate-pulse">
+                {/* Esquinas azules */}
+                <div className="absolute -top-1 -left-1 w-7 h-7 border-t-4 border-l-4 border-blue-500 rounded-tl-2xl"></div>
+                <div className="absolute -top-1 -right-1 w-7 h-7 border-t-4 border-r-4 border-blue-500 rounded-tr-2xl"></div>
+                <div className="absolute -bottom-1 -left-1 w-7 h-7 border-b-4 border-l-4 border-blue-500 rounded-bl-2xl"></div>
+                <div className="absolute -bottom-1 -right-1 w-7 h-7 border-b-4 border-r-4 border-blue-500 rounded-br-2xl"></div>
+              </div>
             </div>
-          </div>
-        )}
-
-        {/* CONTROLES FLOTANTES SOBRE EL VIDEO */}
-        <div className="absolute top-3 right-3 flex items-center gap-2 z-20">
-          {torchSupported && (
-            <button
-              onClick={toggleTorch}
-              className={`p-2.5 rounded-full backdrop-blur-md transition-all ${
-                torchOn ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-black/50 text-white hover:bg-black/70'
-              }`}
-              title="Linterna"
-            >
-              {torchOn ? <Flashlight className="w-4 h-4" /> : <FlashlightOff className="w-4 h-4" />}
-            </button>
           )}
 
-          <button
-            onClick={() => {
-              stopCamera();
-              startCamera();
-            }}
-            className="p-2.5 rounded-full bg-black/50 hover:bg-black/70 text-white backdrop-blur-md"
-            title="Reiniciar cámara"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
-        </div>
+          {/* CONTROLES FLOTANTES */}
+          <div className="absolute top-3 right-3 flex items-center gap-2 z-20">
+            {torchSupported && (
+              <button
+                onClick={toggleTorch}
+                className={`p-2.5 rounded-full backdrop-blur-md transition-all ${
+                  torchOn ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-black/40 text-white hover:bg-black/60'
+                }`}
+                title="Linterna"
+              >
+                {torchOn ? <Flashlight className="w-4 h-4" /> : <FlashlightOff className="w-4 h-4" />}
+              </button>
+            )}
 
-        {/* Error o Cámara apagada */}
-        {cameraError && (
-          <div className="absolute inset-0 bg-slate-950 p-6 flex flex-col items-center justify-center text-center z-10">
-            <AlertCircle className="w-10 h-10 text-rose-400 mb-2" />
-            <p className="text-xs text-rose-300 mb-3">{cameraError}</p>
             <button
-              onClick={startCamera}
-              className="px-4 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold"
+              onClick={() => {
+                stopCamera();
+                startCamera();
+              }}
+              className="p-2.5 rounded-full bg-black/40 hover:bg-black/60 text-white backdrop-blur-md"
+              title="Reiniciar cámara"
             >
-              Reintentar Permiso
+              <RefreshCw className="w-4 h-4" />
             </button>
           </div>
-        )}
+
+          {/* Error de cámara */}
+          {cameraError && (
+            <div className="absolute inset-0 bg-slate-950/90 p-6 flex flex-col items-center justify-center text-center z-10">
+              <AlertCircle className="w-10 h-10 text-rose-400 mb-2" />
+              <p className="text-xs text-rose-200 mb-3">{cameraError}</p>
+              <button
+                onClick={startCamera}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold"
+              >
+                Reintentar
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* TEXTO GUÍA */}
+        <div className="text-center space-y-1">
+          <h2 className="text-sm font-black text-slate-900">Escanear Carné QR</h2>
+          <p className="text-xs text-slate-500 max-w-xs mx-auto">
+            Apunta la cámara al carné impreso o celular del estudiante para registrar la asistencia al instante.
+          </p>
+        </div>
+
+        {/* BOTÓN PRINCIPAL AZUL ELEVADO */}
+        <button
+          onClick={isScanning ? stopCamera : startCamera}
+          className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-bold shadow-md shadow-blue-500/25 active:scale-95 transition-all flex items-center justify-center gap-2"
+        >
+          <Camera className="w-4 h-4" />
+          <span>{isScanning ? 'Pausar Cámara' : 'Iniciar Escáner'}</span>
+        </button>
       </div>
 
-      {/* BUSCADOR / FALLBACK MANUAL POR CÓDIGO O NOMBRE */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5">
-        <label className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider block mb-1.5">
-          Búsqueda Rápida Manual (sin cámara)
+      {/* ========================================================
+          BÚSQUEDA MANUAL / CHECK IN ALTERNATIVO
+         ======================================================== */}
+      <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-2.5">
+        <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
+          Búsqueda o Registro Manual
         </label>
         <form onSubmit={handleManualSearch} className="flex gap-2">
           <div className="relative flex-1">
@@ -301,14 +326,14 @@ export const ScannerPage: React.FC = () => {
               type="text"
               value={manualCode}
               onChange={e => setManualCode(e.target.value)}
-              placeholder="Escribe código (ej: A7K92P), nombre o #"
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-brand-500"
+              placeholder="Código, nombre o número de lista..."
+              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-3.5 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:outline-none"
             />
             {manualCode && (
               <button
                 type="button"
                 onClick={() => setManualCode('')}
-                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white"
+                className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -316,27 +341,27 @@ export const ScannerPage: React.FC = () => {
           </div>
           <button
             type="submit"
-            className="px-3.5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold shadow-touch flex items-center gap-1.5 active:scale-95 transition-all"
+            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-bold shadow-sm flex items-center gap-1.5 active:scale-95 transition-all"
           >
             <Search className="w-3.5 h-3.5" />
             <span>Buscar</span>
           </button>
         </form>
 
-        {/* Selector rápido directo de alumnos */}
-        <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
-          <span>O selecciona directo de la lista:</span>
+        {/* Botón para desplegar lista */}
+        <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
+          <span>O selecciona directo:</span>
           <button
             type="button"
             onClick={() => setManualDropdownOpen(!manualDropdownOpen)}
-            className="text-brand-400 hover:underline font-semibold"
+            className="text-blue-600 hover:text-blue-700 font-bold"
           >
-            {manualDropdownOpen ? 'Ocultar lista' : 'Ver 35 alumnos'}
+            {manualDropdownOpen ? 'Ocultar lista' : `Ver ${students.length} estudiantes`}
           </button>
         </div>
 
         {manualDropdownOpen && (
-          <div className="mt-2 max-h-48 overflow-y-auto space-y-1 pr-1 border-t border-slate-800 pt-2 animate-in fade-in">
+          <div className="mt-2 max-h-48 overflow-y-auto space-y-1 pr-1 border-t border-slate-100 pt-2 animate-in fade-in">
             {students.map(std => (
               <button
                 key={std.id}
@@ -345,10 +370,10 @@ export const ScannerPage: React.FC = () => {
                   setScannedStudent(std);
                   setManualDropdownOpen(false);
                 }}
-                className="w-full text-left p-2 rounded-lg bg-slate-800/60 hover:bg-slate-800 flex items-center justify-between text-xs text-slate-200 transition-colors"
+                className="w-full text-left p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 flex items-center justify-between text-xs text-slate-800 transition-colors"
               >
-                <span>#{String(std.listNumber).padStart(2, '0')} {std.fullName}</span>
-                <span className="font-mono text-[10px] text-brand-300 font-bold bg-slate-700 px-1.5 py-0.5 rounded">
+                <span className="font-semibold">#{String(std.listNumber).padStart(2, '0')} {std.fullName}</span>
+                <span className="font-mono text-[10px] text-blue-700 font-bold bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-md">
                   {std.uniqueCode}
                 </span>
               </button>
@@ -364,41 +389,40 @@ export const ScannerPage: React.FC = () => {
           onClose={() => setScannedStudent(null)}
           onSuccessReturnToScanner={() => {
             setScannedStudent(null);
-            // Preparar cámara de nuevo
           }}
         />
       )}
 
       {/* MODAL RESUMEN FINAL DE ASISTENCIA RÁPIDA */}
       {showRapidSummary && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm text-center shadow-2xl">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto mb-3">
-              <CheckCircle className="w-7 h-7" />
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 w-full max-w-sm text-center shadow-2xl">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3 border border-emerald-100">
+              <CheckCircle className="w-6 h-6" />
             </div>
-            <h2 className="text-lg font-bold text-white mb-1">Asistencia Finalizada</h2>
-            <p className="text-xs text-slate-400 mb-4">
+            <h2 className="text-lg font-black text-slate-900 mb-0.5">Asistencia Finalizada</h2>
+            <p className="text-xs text-slate-500 mb-4">
               Resumen para {activeCourse?.name} ({students.length} estudiantes)
             </p>
 
-            <div className="grid grid-cols-3 gap-2 bg-slate-950/60 p-4 rounded-2xl border border-slate-800 mb-5">
+            <div className="grid grid-cols-3 gap-2 bg-slate-50 p-4 rounded-2xl border border-slate-200 mb-5">
               <div>
-                <div className="text-xl font-black text-emerald-400">
+                <div className="text-xl font-black text-emerald-600">
                   {rapidSessionStats.present}
                 </div>
-                <div className="text-[10px] font-semibold text-slate-400 uppercase mt-0.5">Presentes</div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase mt-0.5">Presentes</div>
               </div>
               <div>
-                <div className="text-xl font-black text-rose-400">
+                <div className="text-xl font-black text-rose-600">
                   {students.length - rapidSessionStats.present - rapidSessionStats.late}
                 </div>
-                <div className="text-[10px] font-semibold text-slate-400 uppercase mt-0.5">Ausentes</div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase mt-0.5">Ausentes</div>
               </div>
               <div>
-                <div className="text-xl font-black text-amber-400">
+                <div className="text-xl font-black text-amber-500">
                   {rapidSessionStats.late}
                 </div>
-                <div className="text-[10px] font-semibold text-slate-400 uppercase mt-0.5">Tardes</div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase mt-0.5">Tardes</div>
               </div>
             </div>
 
@@ -407,7 +431,7 @@ export const ScannerPage: React.FC = () => {
                 setShowRapidSummary(false);
                 setIsRapidMode(false);
               }}
-              className="w-full py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-bold shadow-touch active:scale-95 transition-all"
+              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-bold shadow-md shadow-blue-500/25 active:scale-95 transition-all"
             >
               Aceptar y Cerrar
             </button>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   QrCode,
@@ -6,28 +6,29 @@ import {
   Users,
   BookOpen,
   Printer,
-  TrendingDown,
   CheckCircle,
   AlertTriangle,
   Award,
   ChevronRight,
+  CalendarCheck2,
+  Calendar,
+  Sparkles,
   GraduationCap,
-  Database,
-  PlusCircle,
-  Sparkles
+  FileSpreadsheet,
+  TrendingUp
 } from 'lucide-react';
 import { useCourse } from '../context/CourseContext';
 import { useAuth } from '../context/AuthContext';
-import { useToast } from '../context/ToastContext';
 import { calculateStudentRisk } from '../utils/riskEngine';
+import { calculateStudentWeightedAverage } from '../utils/gradeUtils';
+import { getLocalDateString, getColombiaDayName, formatColombiaFullDate, formatTime12h } from '../utils/dateUtils';
 
 export const HomePage: React.FC = () => {
-  const { courses, activeCourse, students, activities, submissions, attendanceSessions } = useCourse();
+  const { activeCourse, students, activities, submissions, attendanceSessions, behaviorRecords } = useCourse();
   const { teacherProfile } = useAuth();
-  const { showToast } = useToast();
   const navigate = useNavigate();
 
-  // Cálculo de alertas del curso activo
+  // Settings
   const settings = teacherProfile?.settings || {
     gradeScale: { min: 0, max: 5, passingGrade: 3.0 },
     riskThresholds: { minGrade: 3.0, minAttendanceRate: 75, maxUnsubmitted: 3 },
@@ -35,27 +36,30 @@ export const HomePage: React.FC = () => {
     behaviorCategories: []
   };
 
+  const courseActivities = activities.filter(a => !activeCourse || a.courseId === activeCourse.id);
+  const courseSubmissions = submissions.filter(s => courseActivities.some(a => a.id === s.activityId));
+
   const riskEvaluations = students.map(student =>
-    calculateStudentRisk(student, activities, submissions, attendanceSessions, settings)
+    calculateStudentRisk(student, courseActivities, courseSubmissions, attendanceSessions, settings)
   );
 
   const highRiskStudents = riskEvaluations.filter(r => r.level === 'high');
   const mediumRiskStudents = riskEvaluations.filter(r => r.level === 'medium');
 
-  // Promedio global del curso
-  const gradedSubs = submissions.filter(s => s.grade !== null && s.grade !== undefined);
+  // Promedio global
+  const gradedSubs = courseSubmissions.filter(s => s.grade !== null && s.grade !== undefined);
   const globalAverage = gradedSubs.length > 0
     ? (gradedSubs.reduce((acc, curr) => acc + (curr.grade || 0), 0) / gradedSubs.length).toFixed(1)
     : '—';
 
   // Porcentaje global de entregas
-  const totalSubmissionsExpected = students.length * activities.length;
-  const deliveredCount = submissions.filter(s => s.status === 'delivered' || s.status === 'late').length;
+  const totalSubmissionsExpected = students.length * courseActivities.length;
+  const deliveredCount = courseSubmissions.filter(s => s.status === 'delivered' || s.status === 'late').length;
   const deliveryRate = totalSubmissionsExpected > 0
     ? Math.round((deliveredCount / totalSubmissionsExpected) * 100)
     : 0;
 
-  // Porcentaje promedio de asistencia
+  // Asistencia del curso
   let totalAttendances = 0;
   let presentAttendances = 0;
   attendanceSessions.forEach(session => {
@@ -69,219 +73,305 @@ export const HomePage: React.FC = () => {
     ? Math.round((presentAttendances / totalAttendances) * 100)
     : 100;
 
+  // Métricas integrales de Notas Definitivas (Ponderadas con asistencia y convivencia)
+  const courseActs = activities.filter(a => !activeCourse || a.courseId === activeCourse.id);
+  const courseActIds = new Set(courseActs.map(a => a.id));
+  const weights = activeCourse?.componentWeights || { academic: 0.85, attendance: 0.15 };
+
+  let countWithDefinitiva = 0;
+  let countSinNotasDefinitiva = 0;
+  let sumDefinitiva = 0;
+  let countAprobadosDefinitiva = 0;
+
+  students.forEach(student => {
+    const studentSubs = submissions.filter(
+      sub => sub.studentId === student.id && courseActIds.has(sub.activityId)
+    );
+    const weighted = calculateStudentWeightedAverage(courseActs, studentSubs);
+
+    if (weighted.average === null) {
+      countSinNotasDefinitiva++;
+    } else {
+      countWithDefinitiva++;
+
+      // Asistencia del estudiante
+      let pres = 0;
+      attendanceSessions.forEach(sess => {
+        const rec = sess.records[student.id];
+        if (rec) {
+          if (rec.status === 'present') pres++;
+          else if (rec.status === 'late') pres += 0.5;
+          else if (rec.status === 'excused') pres += 0.8;
+        }
+      });
+      const stAttRate = attendanceSessions.length > 0
+        ? Math.min(100, Math.round((pres / attendanceSessions.length) * 100))
+        : 100;
+      const stAttGrade = parseFloat(((stAttRate / 100) * 5.0).toFixed(1));
+
+      // Convivencia: ajuste directo por décimas (+0.1, +0.2, -0.1, -0.2)
+      const stBeh = behaviorRecords.filter(b => b.studentId === student.id);
+      let ap = 0;
+      let rec = 0;
+      let llam = 0;
+      let inc = 0;
+      stBeh.forEach(b => {
+        if (b.type === 'recognition') rec++;
+        else if (b.type === 'positive' || b.type === 'participation' || b.type === 'social') ap++;
+        else if (b.type === 'warning') llam++;
+        else if (b.type === 'non_compliance' || b.type === 'negative') inc++;
+      });
+      const convivenciaAdjustment = (ap * 0.1) + (rec * 0.2) - (llam * 0.1) - (inc * 0.2);
+
+      const baseGrade = (weighted.average * weights.academic) + (stAttGrade * weights.attendance);
+      const def = Math.min(5.0, Math.max(1.0, parseFloat((baseGrade + convivenciaAdjustment).toFixed(1))));
+      sumDefinitiva += def;
+      if (def >= 3.0) countAprobadosDefinitiva++;
+    }
+  });
+
+  const finalAvgFormatted = countWithDefinitiva > 0
+    ? (sumDefinitiva / countWithDefinitiva).toFixed(1)
+    : '—';
+  const finalPassingRate = countWithDefinitiva > 0
+    ? Math.round((countAprobadosDefinitiva / countWithDefinitiva) * 100)
+    : 0;
+
+  const currentDayName = getColombiaDayName();
+  const hasClassToday = activeCourse?.scheduleDays ? activeCourse.scheduleDays.includes(currentDayName) : true;
+  const todayStr = formatColombiaFullDate();
+
   return (
-    <div className="space-y-5 max-w-5xl mx-auto">
-      {/* SALUDO Y ENCABEZADO */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 p-4 md:p-6 rounded-2xl border border-slate-800">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-xl">👋</span>
-            <h1 className="text-lg md:text-2xl font-bold text-white tracking-tight">
-              Hola, {teacherProfile?.displayName?.split(' ')[0] || 'Profesor'}
-            </h1>
-          </div>
-          <p className="text-xs md:text-sm text-slate-400">
-            {activeCourse ? (
-              <>
-                Curso seleccionado: <strong className="text-brand-300 font-semibold">{activeCourse.name}</strong> • {activeCourse.subject} ({activeCourse.currentPeriod})
-              </>
-            ) : (
-              <span>Institución: <strong className="text-brand-300 font-semibold">{teacherProfile?.institution || 'Sin asignar'}</strong></span>
-            )}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {activeCourse && (
-            <button
-              onClick={() => navigate('/scanner')}
-              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white rounded-xl font-bold text-sm shadow-touch active:scale-95 transition-all"
-            >
-              <QrCode className="w-4 h-4" />
-              <span>Escanear QR</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* BANNER DE BIENVENIDA SI AÚN NO TIENE CURSOS EN SU CUENTA */}
-      {courses.length === 0 && (
-        <div className="bg-gradient-to-br from-indigo-950/70 via-slate-900 to-slate-900 border border-indigo-500/30 rounded-2xl p-6 md:p-8 text-center space-y-4 shadow-xl">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-            <GraduationCap className="w-9 h-9" />
-          </div>
+    <div className="space-y-5 max-w-5xl mx-auto pb-12">
+      {/* ========================================================
+          HERO CARD (Estilo AbsenSiswa Screen 3)
+          Tarjeta azul profunda con status del día y botón rápido
+         ======================================================== */}
+      <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-600 rounded-3xl p-5 md:p-7 text-white shadow-xl shadow-blue-500/20">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1.5">
-            <h2 className="text-xl font-bold text-white tracking-tight">
-              ¡Bienvenido a AulaControl! Tu cuenta está conectada a Firestore.
-            </h2>
-            <p className="text-xs md:text-sm text-slate-300 max-w-lg mx-auto">
-              Para comenzar a gestionar tu clase, crea tu primer grupo académico o importa el listado de tus estudiantes desde un archivo de Excel.
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-blue-200 uppercase tracking-wider block">
+                Control de Aula • {activeCourse?.name || 'Selecciona un Curso'}
+              </span>
+              {hasClassToday ? (
+                <span className="bg-emerald-500/25 text-emerald-200 border border-emerald-400/30 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
+                  ✓ Hoy dictas clase ({currentDayName}{activeCourse?.scheduleTime ? ` • ${formatTime12h(activeCourse.scheduleTime)}${activeCourse.scheduleEndTime ? ` - ${formatTime12h(activeCourse.scheduleEndTime)}` : ''}` : ''})
+                </span>
+              ) : (
+                <span className="bg-white/10 text-blue-100 px-2 py-0.5 rounded-full text-[10px] font-medium">
+                  Hoy no dictas este curso ({activeCourse?.scheduleDays?.join(', ') || 'Sin días'})
+                </span>
+              )}
+            </div>
+            <h1 className="text-xl md:text-2xl font-black tracking-tight text-white capitalize">
+              {todayStr}
+            </h1>
+            <p className="text-xs text-blue-100 max-w-md">
+              Docente: <span className="font-bold">{teacherProfile?.displayName || 'Profesor'}</span> • Materia: <span className="font-bold">{activeCourse?.subject || 'General'}</span>
             </p>
           </div>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="bg-white/15 backdrop-blur-md border border-white/20 rounded-2xl px-4 py-2 flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="text-xs font-bold text-white">{attendanceRate}% Asistencia</span>
+            </div>
+
             <button
-              onClick={() => navigate('/courses')}
-              className="w-full sm:w-auto px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs md:text-sm font-bold shadow-lg shadow-brand-500/25 transition-all flex items-center justify-center gap-2 active:scale-95"
+              onClick={() => navigate('/scanner')}
+              className="bg-white text-blue-700 hover:bg-blue-50 font-black text-xs px-4 py-2.5 rounded-2xl shadow-md transition-all active:scale-95 flex items-center gap-2"
             >
-              <PlusCircle className="w-4 h-4" />
-              <span>Crear mi Primer Curso</span>
-            </button>
-            <button
-              onClick={() => navigate('/students')}
-              className="w-full sm:w-auto px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs md:text-sm font-semibold transition-all flex items-center justify-center gap-2 active:scale-95"
-            >
-              <Users className="w-4 h-4" />
-              <span>Gestionar e Importar Estudiantes</span>
+              <QrCode className="w-4 h-4 text-blue-600" />
+              <span>Escanear QR</span>
             </button>
           </div>
         </div>
-      )}
 
-      {/* MÉTRICAS CLAVE (KPIs) */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 md:gap-4">
-        {/* Estudiantes */}
-        <div
-          onClick={() => navigate('/students')}
-          className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 p-3.5 rounded-xl cursor-pointer transition-all active:scale-95"
-        >
-          <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wider">Estudiantes</span>
-            <Users className="w-4 h-4 text-brand-400" />
-          </div>
-          <div className="text-2xl font-black text-white">{students.length}</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">En lista activa</div>
-        </div>
-
-        {/* Asistencia */}
-        <div
-          onClick={() => navigate('/attendance')}
-          className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 p-3.5 rounded-xl cursor-pointer transition-all active:scale-95"
-        >
-          <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wider">Asistencia</span>
-            <CheckCircle className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div className="text-2xl font-black text-emerald-400">{attendanceRate}%</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">{attendanceSessions.length} sesiones registradas</div>
-        </div>
-
-        {/* Actividades Entregadas */}
-        <div
-          onClick={() => navigate('/activities')}
-          className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 p-3.5 rounded-xl cursor-pointer transition-all active:scale-95"
-        >
-          <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wider">Entregas</span>
-            <BookOpen className="w-4 h-4 text-indigo-400" />
-          </div>
-          <div className="text-2xl font-black text-indigo-400">{deliveryRate}%</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">{activities.length} actividades activas</div>
-        </div>
-
-        {/* Promedio General */}
-        <div
-          onClick={() => navigate('/grades')}
-          className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 p-3.5 rounded-xl cursor-pointer transition-all active:scale-95"
-        >
-          <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wider">Promedio</span>
-            <Award className="w-4 h-4 text-amber-400" />
-          </div>
-          <div className="text-2xl font-black text-amber-400">{globalAverage}</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">Escala {settings.gradeScale.min} - {settings.gradeScale.max}</div>
-        </div>
-
-        {/* Alertas Académicas */}
-        <div
-          onClick={() => navigate('/dashboard')}
-          className="col-span-2 lg:col-span-1 bg-slate-900/90 border border-rose-900/40 hover:border-rose-700/60 p-3.5 rounded-xl cursor-pointer transition-all active:scale-95"
-        >
-          <div className="flex items-center justify-between text-rose-400 mb-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wider">Atención</span>
-            <AlertTriangle className="w-4 h-4 text-rose-400" />
-          </div>
-          <div className="text-2xl font-black text-rose-400">{highRiskStudents.length}</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">+{mediumRiskStudents.length} en seguimiento</div>
-        </div>
+        {/* Círculos decorativos sutiles */}
+        <div className="absolute -right-8 -bottom-10 w-40 h-40 rounded-full bg-white/10 pointer-events-none"></div>
+        <div className="absolute right-24 -top-8 w-28 h-28 rounded-full bg-white/5 pointer-events-none"></div>
       </div>
 
-      {/* ACCIONES RÁPIDAS EN EL AULA (TÁCTILES, BOTONES GRANDES) */}
+      {/* ========================================================
+          ACCIONES FRECUENTES EN CUADRÍCULA (SQUIRCLES AbsenSiswa)
+         ======================================================== */}
       <div>
-        <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5 px-1">
-          Acciones Frecuentes en el Aula
+        <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 px-1">
+          Acciones Principales
         </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {/* Botón Principal: Escanear */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          {/* Check In / Escaneo */}
           <button
             onClick={() => navigate('/scanner')}
-            className="flex flex-col items-center justify-center p-4 bg-gradient-to-b from-brand-600 to-indigo-700 hover:from-brand-500 hover:to-indigo-600 rounded-2xl text-white shadow-touch active:scale-95 transition-all text-center gap-2"
+            className="bg-white hover:bg-slate-50 border border-slate-200/90 rounded-3xl p-4 flex flex-col items-center justify-center text-center gap-2.5 shadow-xs transition-all hover:border-blue-300 hover:shadow-md active:scale-95 touch-manipulation"
           >
-            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
-              <QrCode className="w-7 h-7" />
+            <div className="w-13 h-13 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+              <QrCode className="w-6 h-6" />
             </div>
             <div>
-              <span className="block font-bold text-sm">Escanear Estudiante</span>
-              <span className="text-[10px] text-brand-100 opacity-90">Acción instantánea</span>
+              <span className="block font-bold text-xs text-slate-900">Escanear QR</span>
+              <span className="text-[10px] text-slate-400 font-medium">Asistencia Cámara</span>
             </div>
           </button>
 
-          {/* Asistencia Rápida */}
+          {/* Historial Asistencia */}
           <button
-            onClick={() => navigate('/attendance/quick-scan')}
-            className="flex flex-col items-center justify-center p-4 bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-2xl text-white active:scale-95 transition-all text-center gap-2"
+            onClick={() => navigate('/attendance')}
+            className="bg-white hover:bg-slate-50 border border-slate-200/90 rounded-3xl p-4 flex flex-col items-center justify-center text-center gap-2.5 shadow-xs transition-all hover:border-emerald-300 hover:shadow-md active:scale-95 touch-manipulation"
           >
-            <div className="w-12 h-12 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
-              <Zap className="w-7 h-7" />
+            <div className="w-13 h-13 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
+              <CalendarCheck2 className="w-6 h-6" />
             </div>
             <div>
-              <span className="block font-bold text-sm">Asistencia Rápida</span>
-              <span className="text-[10px] text-slate-400">Escaneo continuo</span>
+              <span className="block font-bold text-xs text-slate-900">Pasar Lista</span>
+              <span className="text-[10px] text-slate-400 font-medium">Historial & Fechas</span>
             </div>
           </button>
 
-          {/* Control Entregas */}
+          {/* Actividades / Tareas */}
           <button
             onClick={() => navigate('/activities')}
-            className="flex flex-col items-center justify-center p-4 bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-2xl text-white active:scale-95 transition-all text-center gap-2"
+            className="bg-white hover:bg-slate-50 border border-slate-200/90 rounded-3xl p-4 flex flex-col items-center justify-center text-center gap-2.5 shadow-xs transition-all hover:border-purple-300 hover:shadow-md active:scale-95 touch-manipulation"
           >
-            <div className="w-12 h-12 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
-              <BookOpen className="w-7 h-7" />
+            <div className="w-13 h-13 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center border border-purple-100">
+              <BookOpen className="w-6 h-6" />
             </div>
             <div>
-              <span className="block font-bold text-sm">Revisar Actividades</span>
-              <span className="text-[10px] text-slate-400">Entregas y notas</span>
+              <span className="block font-bold text-xs text-slate-900">Actividades</span>
+              <span className="text-[10px] text-slate-400 font-medium">Calificar Tareas</span>
             </div>
           </button>
 
-          {/* Imprimir Carnés QR */}
+          {/* NOTAS DEFINITIVAS (Botón solicitado por el docente) */}
           <button
-            onClick={() => navigate('/qr-cards')}
-            className="flex flex-col items-center justify-center p-4 bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-2xl text-white active:scale-95 transition-all text-center gap-2"
+            onClick={() => navigate('/definitivas')}
+            className="bg-gradient-to-b from-white to-blue-50/40 hover:to-blue-100/60 border border-blue-200 rounded-3xl p-4 flex flex-col items-center justify-center text-center gap-2.5 shadow-xs transition-all hover:border-blue-400 hover:shadow-md active:scale-95 touch-manipulation group"
           >
-            <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center">
-              <Printer className="w-7 h-7" />
+            <div className="w-13 h-13 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-md shadow-blue-500/25 group-hover:scale-105 transition-transform">
+              <GraduationCap className="w-6 h-6" />
             </div>
             <div>
-              <span className="block font-bold text-sm">Carnés QR</span>
-              <span className="text-[10px] text-slate-400">Imprimir hoja A4</span>
+              <span className="block font-black text-xs text-blue-900">Notas Definitivas</span>
+              <span className="text-[10px] text-blue-600 font-bold">Consolidado & Excel</span>
+            </div>
+          </button>
+
+          {/* Carnés QR */}
+          <button
+            onClick={() => navigate('/qr-cards')}
+            className="bg-white hover:bg-slate-50 border border-slate-200/90 rounded-3xl p-4 flex flex-col items-center justify-center text-center gap-2.5 shadow-xs transition-all hover:border-amber-300 hover:shadow-md active:scale-95 touch-manipulation col-span-2 sm:col-span-1"
+          >
+            <div className="w-13 h-13 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100">
+              <Printer className="w-6 h-6" />
+            </div>
+            <div>
+              <span className="block font-bold text-xs text-slate-900">Carnés QR</span>
+              <span className="text-[10px] text-slate-400 font-medium">Descargar PDF</span>
             </div>
           </button>
         </div>
       </div>
 
-      {/* SECCIÓN "¿QUIÉNES NECESITAN ATENCIÓN?" (EXPLICABLE Y CONFIGURABLE) */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 md:p-5">
-        <div className="flex items-center justify-between mb-3.5">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-rose-400" />
+      {/* ========================================================
+          KPIs / RESUMEN GENERAL (Tarjetas Blancas Pulcras)
+         ======================================================== */}
+      <div>
+        <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 px-1">
+          Resumen del Curso
+        </h2>
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          {/* Estudiantes */}
+          <div
+            onClick={() => navigate('/students')}
+            className="bg-white border border-slate-200/90 rounded-3xl p-4 cursor-pointer hover:border-blue-300 hover:shadow-sm transition-all"
+          >
+            <div className="flex items-center justify-between text-slate-500 mb-1.5">
+              <span className="text-[11px] font-bold">Estudiantes</span>
+              <Users className="w-4 h-4 text-blue-600" />
+            </div>
+            <div className="text-2xl font-black text-slate-900">{students.length}</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">En lista activa</div>
+          </div>
+
+          {/* Asistencia Global */}
+          <div
+            onClick={() => navigate('/attendance')}
+            className="bg-white border border-slate-200/90 rounded-3xl p-4 cursor-pointer hover:border-emerald-300 hover:shadow-sm transition-all"
+          >
+            <div className="flex items-center justify-between text-slate-500 mb-1.5">
+              <span className="text-[11px] font-bold">Asistencia</span>
+              <CheckCircle className="w-4 h-4 text-emerald-600" />
+            </div>
+            <div className="text-2xl font-black text-emerald-600">{attendanceRate}%</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">{attendanceSessions.length} sesiones registradas</div>
+          </div>
+
+          {/* Entregas */}
+          <div
+            onClick={() => navigate('/activities')}
+            className="bg-white border border-slate-200/90 rounded-3xl p-4 cursor-pointer hover:border-indigo-300 hover:shadow-sm transition-all"
+          >
+            <div className="flex items-center justify-between text-slate-500 mb-1.5">
+              <span className="text-[11px] font-bold">Entregas</span>
+              <BookOpen className="w-4 h-4 text-indigo-600" />
+            </div>
+            <div className="text-2xl font-black text-indigo-600">{deliveryRate}%</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">{activities.length} actividades activas</div>
+          </div>
+
+          {/* Promedio Evaluaciones */}
+          <div
+            onClick={() => navigate('/grades')}
+            className="bg-white border border-slate-200/90 rounded-3xl p-4 cursor-pointer hover:border-amber-300 hover:shadow-sm transition-all"
+          >
+            <div className="flex items-center justify-between text-slate-500 mb-1.5">
+              <span className="text-[11px] font-bold">Prom. Tareas</span>
+              <Award className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="text-2xl font-black text-amber-600">{globalAverage}</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">Actividades evaluadas</div>
+          </div>
+
+          {/* NOTAS DEFINITIVAS (Métrica Directa Solicitada) */}
+          <div
+            onClick={() => navigate('/definitivas')}
+            className="bg-gradient-to-br from-blue-50/70 via-white to-indigo-50/40 border border-blue-200 rounded-3xl p-4 cursor-pointer hover:border-blue-400 hover:shadow-md transition-all col-span-2 lg:col-span-1"
+          >
+            <div className="flex items-center justify-between text-blue-900 mb-1.5">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-blue-700">Definitiva Curso</span>
+              <GraduationCap className="w-4 h-4 text-blue-600" />
+            </div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-2xl font-black text-blue-900">{finalAvgFormatted}</span>
+              <span className="text-xs text-blue-500 font-bold">/ 5.0</span>
+            </div>
+            <div className="text-[10px] text-blue-600 font-semibold mt-0.5">
+              {countWithDefinitiva > 0
+                ? `${finalPassingRate}% pasan (${countWithDefinitiva} eval.)`
+                : `${countSinNotasDefinitiva} est. pendientes`}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================================
+          ALERTAS ACADÉMICAS / SEGUIMIENTO
+         ======================================================== */}
+      <div className="bg-white border border-slate-200/90 rounded-3xl p-5 shadow-xs">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+              <AlertTriangle className="w-4 h-4" />
+            </div>
             <div>
-              <h2 className="text-sm md:text-base font-bold text-white">¿Quiénes necesitan atención?</h2>
-              <p className="text-[11px] text-slate-400">Estudiantes con alertas basadas en los umbrales configurados</p>
+              <h2 className="text-sm font-bold text-slate-900">Estudiantes en Seguimiento</h2>
+              <p className="text-[11px] text-slate-500">Alertas por inasistencias o tareas pendientes</p>
             </div>
           </div>
           <button
             onClick={() => navigate('/dashboard')}
-            className="text-xs text-brand-400 hover:text-brand-300 font-semibold flex items-center gap-1"
+            className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1"
           >
             <span>Ver todo</span>
             <ChevronRight className="w-3.5 h-3.5" />
@@ -289,46 +379,37 @@ export const HomePage: React.FC = () => {
         </div>
 
         {highRiskStudents.length === 0 && mediumRiskStudents.length === 0 ? (
-          <div className="p-6 text-center text-slate-400 bg-slate-950/40 rounded-xl border border-slate-800/60">
-            <CheckCircle className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
-            <p className="text-sm font-semibold text-white">¡Excelente! Ningún estudiante presenta alertas críticas hoy.</p>
-            <p className="text-xs mt-1">Todos se encuentran por encima de los umbrales de nota y asistencia.</p>
+          <div className="p-6 text-center text-slate-500 bg-slate-50 rounded-2xl border border-slate-100">
+            <CheckCircle className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
+            <p className="text-xs font-bold text-slate-800">¡Todo al día!</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">No hay estudiantes en situación de riesgo en este curso.</p>
           </div>
         ) : (
-          <div className="space-y-2.5">
-            {highRiskStudents.slice(0, 4).map(alert => (
+          <div className="space-y-2">
+            {[...highRiskStudents, ...mediumRiskStudents].slice(0, 4).map(evalData => (
               <div
-                key={alert.studentId}
-                onClick={() => navigate(`/students/${alert.studentId}`)}
-                className="p-3 bg-rose-950/20 border border-rose-900/30 hover:border-rose-700/50 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 cursor-pointer transition-colors"
+                key={evalData.studentId}
+                onClick={() => navigate(`/students/${evalData.studentId}`)}
+                className="flex items-center justify-between p-3 rounded-2xl bg-slate-50/70 hover:bg-slate-100/70 border border-slate-100 cursor-pointer transition-all"
               >
-                <div className="flex items-start gap-2.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 mt-1 shrink-0 animate-pulse"></span>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0">
+                    {evalData.studentName[0]}
+                  </div>
                   <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-white text-sm">
-                        #{String(alert.listNumber).padStart(2, '0')} {alert.studentName}
-                      </span>
-                      <span className="text-[10px] bg-rose-500/20 text-rose-300 font-semibold px-2 py-0.5 rounded-full border border-rose-500/30">
-                        Atención prioritaria
-                      </span>
-                    </div>
-                    {/* Motivos explicados de la alerta */}
-                    <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-rose-200/80">
-                      {alert.reasons.map((r, i) => (
-                        <span key={i} className="bg-rose-950/50 px-2 py-0.5 rounded-md border border-rose-800/40">
-                          • {r}
-                        </span>
-                      ))}
-                    </div>
+                    <span className="text-xs font-bold text-slate-900 block">{evalData.studentName}</span>
+                    <span className="text-[10px] text-slate-500">N° {evalData.listNumber || '—'} • {evalData.reasons[0] || 'Alerta académica'}</span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
-                  <div className="text-right text-xs">
-                    <div className="text-slate-400">Promedio: <strong className="text-rose-300 font-bold">{alert.currentAverage}</strong></div>
-                    <div className="text-slate-400">Asistencia: <strong className="text-slate-200">{alert.attendanceRate}%</strong></div>
-                  </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${
+                    evalData.level === 'high'
+                      ? 'bg-rose-50 text-rose-700 border-rose-200'
+                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                  }`}>
+                    {evalData.level === 'high' ? 'Riesgo Alto' : 'En Seguimiento'}
+                  </span>
                   <ChevronRight className="w-4 h-4 text-slate-400" />
                 </div>
               </div>

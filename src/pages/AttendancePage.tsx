@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   CalendarCheck2,
@@ -12,28 +12,46 @@ import {
   ChevronLeft,
   ChevronRight,
   QrCode,
-  Users,
-  UserPlus
+  Check,
+  AlertCircle,
+  RotateCcw
 } from 'lucide-react';
 import { useCourse } from '../context/CourseContext';
 import { useToast } from '../context/ToastContext';
 import { excelService } from '../services/excelService';
 import { AttendanceStatus } from '../types';
+import {
+  getColombiaDateString,
+  getDayNameFromDateString,
+  formatColombiaFullDate,
+  getColombiaTimeString,
+  formatTime12h
+} from '../utils/dateUtils';
 
 export const AttendancePage: React.FC = () => {
   const { students, activeCourse, attendanceSessions, recordAttendance } = useCourse();
   const { showToast } = useToast();
   const navigate = useNavigate();
 
-  const [selectedDate, setSelectedDate] = useState<string>(() => {
-    return new Date().toISOString().split('T')[0];
-  });
+  // Fecha seleccionada por defecto en hora de Colombia (America/Bogota, UTC-5)
+  const todayColombia = getColombiaDateString();
+  const [selectedDate, setSelectedDate] = useState<string>(todayColombia);
 
-  // Buscar sesión para la fecha seleccionada
+  // Hora actual en Colombia con actualización cada minuto
+  const [colombiaTime, setColombiaTime] = useState<string>(getColombiaTimeString());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setColombiaTime(getColombiaTimeString());
+    }, 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Sesión para la fecha seleccionada
   const currentSession = attendanceSessions.find(s => s.date === selectedDate);
   const sessionRecords = currentSession?.records || {};
 
-  // Contadores para la fecha seleccionada
+  // Contadores
   let presentCount = 0;
   let absentCount = 0;
   let lateCount = 0;
@@ -41,7 +59,7 @@ export const AttendancePage: React.FC = () => {
 
   students.forEach(student => {
     const rec = sessionRecords[student.id];
-    const status = rec?.status || 'present'; // Default si se inicia sesión hoy
+    const status = rec?.status || 'present';
     if (status === 'present') presentCount++;
     else if (status === 'absent') absentCount++;
     else if (status === 'late') lateCount++;
@@ -52,6 +70,12 @@ export const AttendancePage: React.FC = () => {
   const attendanceRate = total > 0
     ? Math.round(((presentCount + excusedCount + (lateCount * 0.8)) / total) * 100)
     : 100;
+
+  // Verificación del horario del curso según el día seleccionado
+  const selectedDayName = getDayNameFromDateString(selectedDate);
+  const scheduledDays = activeCourse?.scheduleDays || [];
+  const isScheduledDay = scheduledDays.length === 0 || scheduledDays.includes(selectedDayName);
+  const isToday = selectedDate === todayColombia;
 
   const handleStatusChange = (studentId: string, status: AttendanceStatus) => {
     recordAttendance(selectedDate, studentId, status, 'manual');
@@ -70,173 +94,196 @@ export const AttendancePage: React.FC = () => {
     showToast(`✓ Registro de asistencia exportado a Excel`, 'info');
   };
 
+  const changeDateByDays = (days: number) => {
+    const [y, m, d] = selectedDate.split('-').map(Number);
+    const dateObj = new Date(y, m - 1, d + days, 12, 0, 0);
+    setSelectedDate(getColombiaDateString(dateObj));
+  };
+
   return (
-    <div className="space-y-4 max-w-4xl mx-auto">
-      {/* CABECERA */}
+    <div className="space-y-4 max-w-4xl mx-auto pb-12">
+      {/* CABECERA (Estilo AbsenSiswa) */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <CalendarCheck2 className="w-5 h-5 text-emerald-400" />
+          <h1 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+            <CalendarCheck2 className="w-5 h-5 text-blue-600" />
             <span>Control de Asistencia</span>
           </h1>
-          <p className="text-xs text-slate-400">
-            Curso: <strong className="text-slate-200">{activeCourse?.name}</strong> • {activeCourse?.subject}
+          <p className="text-xs text-slate-500 font-medium">
+            Curso: <strong className="text-slate-800">{activeCourse?.name}</strong> • {activeCourse?.subject}
           </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Botón Escaneo Rápido */}
           <button
             onClick={() => navigate('/scanner')}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-lg active:scale-95 transition-all"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs active:scale-95 transition-all"
           >
             <Zap className="w-4 h-4" />
-            <span>Pase Rápido con QR</span>
+            <span>Escanear con QR</span>
           </button>
 
           <button
             onClick={handleExport}
             title="Exportar a Excel"
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700 text-xs"
+            className="p-2.5 bg-white hover:bg-slate-50 text-slate-700 rounded-xl border border-slate-200 text-xs shadow-xs transition-colors"
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-4 h-4 text-emerald-600" />
           </button>
         </div>
       </div>
 
-      {/* SELECTOR DE FECHA Y RESUMEN DEL DÍA */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        {/* Selector de Fecha */}
-        <div className="flex items-center gap-2">
+      {/* BARRA DE FECHA Y HORA COLOMBIA (AMERICA/BOGOTA) */}
+      <div className="bg-white border border-slate-200/90 rounded-3xl p-4 shadow-xs space-y-3">
+        <div className="flex items-center justify-between gap-2">
           <button
-            type="button"
+            onClick={() => changeDateByDays(-1)}
+            className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors"
             title="Día anterior"
-            onClick={() => {
-              const d = new Date(selectedDate + 'T12:00:00');
-              d.setDate(d.getDate() - 1);
-              setSelectedDate(d.toISOString().split('T')[0]);
-            }}
-            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className="w-5 h-5" />
           </button>
 
-          <div className="flex items-center gap-1.5">
-            <Calendar className="w-4 h-4 text-brand-400" />
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={e => setSelectedDate(e.target.value)}
-              className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white font-medium focus:outline-none focus:border-brand-500"
-            />
+          <div className="flex flex-col items-center text-center">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={e => setSelectedDate(e.target.value)}
+                className="bg-transparent border-none text-sm font-extrabold text-slate-900 focus:outline-none cursor-pointer"
+              />
+            </div>
+            <span className="text-xs font-bold text-slate-700 mt-0.5">
+              {formatColombiaFullDate(selectedDate)}
+            </span>
           </div>
 
           <button
-            type="button"
+            onClick={() => changeDateByDays(1)}
+            className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors"
             title="Día siguiente"
-            onClick={() => {
-              const d = new Date(selectedDate + 'T12:00:00');
-              d.setDate(d.getDate() + 1);
-              setSelectedDate(d.toISOString().split('T')[0]);
-            }}
-            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
           >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
-            className="text-[10px] text-slate-400 hover:text-white px-2 py-1 bg-slate-800/80 rounded-lg font-medium"
-          >
-            Hoy
+            <ChevronRight className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Tarjetas métricas del día */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-950/50 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 font-bold">
-            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-            <span>{presentCount} Presentes</span>
+        {/* DETALLE HORARIO COLOMBIA Y DÍAS DE CLASE DOCENTE */}
+        <div className="pt-2.5 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-xl font-bold text-[11px]">
+              <Clock className="w-3.5 h-3.5" />
+              <span>Hora Colombia: {formatTime12h(colombiaTime)}</span>
+            </div>
+
+            {!isToday && (
+              <button
+                onClick={() => setSelectedDate(todayColombia)}
+                className="inline-flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded-xl text-[11px] font-bold transition-colors"
+              >
+                <RotateCcw className="w-3 h-3 text-blue-600" />
+                <span>Ir a Hoy</span>
+              </button>
+            )}
           </div>
 
-          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-950/50 border border-rose-500/30 rounded-xl text-xs text-rose-300 font-bold">
-            <span className="w-2 h-2 rounded-full bg-rose-400"></span>
-            <span>{absentCount} Ausentes</span>
+          {/* Estado de programación del curso */}
+          <div className="flex items-center gap-1.5">
+            {isScheduledDay ? (
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-xl">
+                <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Día de clase programado ({selectedDayName})</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-xl">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                <span>Fuera del horario habitual ({scheduledDays.join(', ')})</span>
+              </span>
+            )}
           </div>
-
-          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-950/50 border border-amber-500/30 rounded-xl text-xs text-amber-300 font-bold">
-            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-            <span>{lateCount} Tardes</span>
-          </div>
-
-          <button
-            onClick={markAllPresent}
-            className="text-[11px] text-brand-400 hover:text-brand-300 font-semibold px-2 py-1 bg-slate-800 rounded-lg ml-auto md:ml-0"
-          >
-            Marcar todos presentes
-          </button>
         </div>
       </div>
 
-      {/* LISTADO TÁCTIL DE ESTUDIANTES PARA ASISTENCIA MANUAL */}
-      {students.length === 0 ? (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center space-y-4">
-          <div className="w-14 h-14 mx-auto rounded-2xl bg-slate-800 flex items-center justify-center text-slate-400">
-            <Users className="w-7 h-7" />
-          </div>
-          <div>
-            <h3 className="font-bold text-white text-base">No hay estudiantes en este curso</h3>
-            <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
-              Para pasar lista por QR o de forma manual, primero registra o importa los estudiantes desde un archivo Excel.
-            </p>
-          </div>
-          <button
-            onClick={() => navigate('/students')}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-brand-500/20 active:scale-95 transition-all"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>Gestionar o Importar Estudiantes</span>
-          </button>
+      {/* ========================================================
+          TARJETAS CONTADORAS (Estilo AbsenSiswa Screen 5)
+          Present (Verde), Late (Ámbar), Absent (Rojo)
+         ======================================================== */}
+      <div className="grid grid-cols-3 gap-3">
+        {/* Presentes */}
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-4 text-center shadow-xs">
+          <span className="text-xs font-bold text-slate-500 block mb-1">Presentes</span>
+          <div className="text-2xl md:text-3xl font-black text-emerald-600">{presentCount}</div>
         </div>
-      ) : (
-        <div className="space-y-2">
-          {students.map(student => {
+
+        {/* Tardes */}
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-4 text-center shadow-xs">
+          <span className="text-xs font-bold text-slate-500 block mb-1">Tardes</span>
+          <div className="text-2xl md:text-3xl font-black text-amber-500">{lateCount}</div>
+        </div>
+
+        {/* Ausentes */}
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-4 text-center shadow-xs">
+          <span className="text-xs font-bold text-slate-500 block mb-1">Ausentes</span>
+          <div className="text-2xl md:text-3xl font-black text-rose-600">{absentCount}</div>
+        </div>
+      </div>
+
+      {/* BOTÓN RÁPIDO PARA MARCAR TODOS PRESENTES */}
+      <div className="flex justify-end">
+        <button
+          onClick={markAllPresent}
+          className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-50 border border-blue-200/80 active:scale-95 transition-all shadow-xs"
+        >
+          <Check className="w-3.5 h-3.5" />
+          <span>Marcar todos presentes</span>
+        </button>
+      </div>
+
+      {/* ========================================================
+          LISTA DE ASISTENCIA MANUAL TÁCTIL
+         ======================================================== */}
+      <div className="space-y-2">
+        {students.length === 0 ? (
+          <div className="bg-white border border-slate-200 rounded-3xl p-8 text-center text-slate-400">
+            No hay estudiantes en este curso todavía.
+          </div>
+        ) : (
+          students.map(student => {
             const rec = sessionRecords[student.id];
             const currentStatus: AttendanceStatus = rec?.status || 'present';
 
             return (
               <div
                 key={student.id}
-                className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                className="bg-white border border-slate-200/90 rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs hover:border-slate-300 transition-all"
               >
                 {/* Info Alumno */}
                 <div className="flex items-center gap-3">
-                  <span className="w-8 h-8 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-mono font-bold text-xs flex items-center justify-center shrink-0">
+                  <span className="w-8 h-8 rounded-xl bg-blue-50 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0 border border-blue-100">
                     #{String(student.listNumber).padStart(2, '0')}
                   </span>
                   <div>
-                    <h3 className="font-bold text-sm text-white">{student.fullName}</h3>
-                    <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                      <span className="font-mono text-brand-300">{student.uniqueCode}</span>
+                    <h3 className="font-bold text-sm text-slate-900">{student.fullName}</h3>
+                    <div className="flex items-center gap-2 text-[10px] text-slate-400 font-medium">
+                      <span className="font-mono text-blue-600">{student.uniqueCode}</span>
                       {rec?.source === 'qr' && (
-                        <span className="bg-emerald-500/10 text-emerald-400 px-1 rounded flex items-center gap-0.5">
-                          <QrCode className="w-2.5 h-2.5" /> Escaneado
+                        <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.2 rounded-md font-bold flex items-center gap-0.5">
+                          <QrCode className="w-2.5 h-2.5" /> QR
                         </span>
                       )}
                     </div>
                   </div>
                 </div>
 
-                {/* Botones de Estado Táctil (1-Tap) */}
+                {/* Botones de Estado Táctiles (Píldoras AbsenSiswa) */}
                 <div className="grid grid-cols-4 gap-1.5 sm:flex sm:items-center shrink-0">
                   <button
                     type="button"
                     onClick={() => handleStatusChange(student.id, 'present')}
-                    className={`py-1.5 px-2.5 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
+                    className={`py-1.5 px-3 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
                       currentStatus === 'present'
-                        ? 'bg-emerald-600 border-emerald-500 text-white shadow-sm'
-                        : 'bg-slate-800/80 border-slate-700/80 text-slate-400 hover:text-slate-200'
+                        ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
                     Presente
@@ -245,10 +292,10 @@ export const AttendancePage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => handleStatusChange(student.id, 'absent')}
-                    className={`py-1.5 px-2.5 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
+                    className={`py-1.5 px-3 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
                       currentStatus === 'absent'
-                        ? 'bg-rose-600 border-rose-500 text-white shadow-sm'
-                        : 'bg-slate-800/80 border-slate-700/80 text-slate-400 hover:text-slate-200'
+                        ? 'bg-rose-600 border-rose-600 text-white shadow-xs'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
                     Ausente
@@ -257,10 +304,10 @@ export const AttendancePage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => handleStatusChange(student.id, 'late')}
-                    className={`py-1.5 px-2.5 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
+                    className={`py-1.5 px-3 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
                       currentStatus === 'late'
-                        ? 'bg-amber-600 border-amber-500 text-white shadow-sm'
-                        : 'bg-slate-800/80 border-slate-700/80 text-slate-400 hover:text-slate-200'
+                        ? 'bg-amber-500 border-amber-500 text-white shadow-xs'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
                     Tarde
@@ -269,10 +316,10 @@ export const AttendancePage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => handleStatusChange(student.id, 'excused')}
-                    className={`py-1.5 px-2.5 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
+                    className={`py-1.5 px-3 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
                       currentStatus === 'excused'
-                        ? 'bg-blue-600 border-blue-500 text-white shadow-sm'
-                        : 'bg-slate-800/80 border-slate-700/80 text-slate-400 hover:text-slate-200'
+                        ? 'bg-blue-600 border-blue-600 text-white shadow-xs'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
                     Excusa
@@ -280,9 +327,9 @@ export const AttendancePage: React.FC = () => {
                 </div>
               </div>
             );
-          })}
-        </div>
-      )}
+          })
+        )}
+      </div>
     </div>
   );
 };

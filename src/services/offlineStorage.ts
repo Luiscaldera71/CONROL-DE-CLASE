@@ -53,5 +53,21 @@ export const offlineStorage = {
     } catch {
       return fallback;
     }
+  },
+
+  // Limpiar todos los datos guardados localmente
+  clearAllLocal(): void {
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(LOCAL_DATA_PREFIX)) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+    } catch (e) {
+      console.warn('Error al limpiar datos locales:', e);
+    }
   }
 };

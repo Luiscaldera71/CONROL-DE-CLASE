@@ -7,14 +7,18 @@ import {
   School,
   LogIn,
   UserPlus,
+  Sparkles,
   AlertCircle,
-  BookOpen
+  CheckCircle,
+  Database
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useCourse } from '../../context/CourseContext';
 import { useToast } from '../../context/ToastContext';
 
 export const AuthModal: React.FC = () => {
-  const { isAuthModalOpen, closeAuthModal, login, register } = useAuth();
+  const { isAuthModalOpen, closeAuthModal, login, register, enableDemoMode, isDemoMode, currentUser } = useAuth();
+  const { courses, seedDemoToFirestore } = useCourse();
   const { showToast } = useToast();
 
   const [mode, setMode] = useState<'login' | 'register'>('login');
@@ -22,9 +26,9 @@ export const AuthModal: React.FC = () => {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [institution, setInstitution] = useState('');
-  const [subject, setSubject] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [seeding, setSeeding] = useState(false);
 
   if (!isAuthModalOpen) return null;
 
@@ -39,15 +43,8 @@ export const AuthModal: React.FC = () => {
         showToast('✓ Sesión iniciada con éxito en Firebase', 'success');
       } else {
         if (!name.trim()) throw new Error('Ingresa tu nombre completo');
-        if (!institution.trim()) throw new Error('Ingresa el nombre de tu institución educativa');
         if (password.length < 6) throw new Error('La contraseña debe tener al menos 6 caracteres');
-        await register(
-          email.trim(),
-          password,
-          name.trim(),
-          institution.trim(),
-          subject.trim() || undefined
-        );
+        await register(email.trim(), password, name.trim(), institution.trim() || 'Institución Educativa');
         showToast('✓ Cuenta de docente creada en Firebase', 'success');
       }
     } catch (err: any) {
@@ -65,6 +62,19 @@ export const AuthModal: React.FC = () => {
       setErrorMsg(msg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSeedData = async () => {
+    setSeeding(true);
+    try {
+      await seedDemoToFirestore();
+      showToast('✓ Cursos y estudiantes iniciales cargados en tu Firestore', 'success');
+      closeAuthModal();
+    } catch (err) {
+      showToast('Error cargando datos en Firestore. Revisa las reglas de seguridad.', 'error');
+    } finally {
+      setSeeding(false);
     }
   };
 
@@ -142,29 +152,14 @@ export const AuthModal: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-[11px] font-semibold text-slate-300 block mb-1">Institución Educativa *</label>
+                <label className="text-[11px] font-semibold text-slate-300 block mb-1">Institución Educativa</label>
                 <div className="relative">
                   <School className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
                   <input
                     type="text"
-                    required
-                    placeholder="Ej: I.E. San José"
+                    placeholder="I.E. República de Colombia"
                     value={institution}
                     onChange={(e) => setInstitution(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[11px] font-semibold text-slate-300 block mb-1">Área o Asignatura (Opcional)</label>
-                <div className="relative">
-                  <BookOpen className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
-                  <input
-                    type="text"
-                    placeholder="Ej: Tecnología e Informática, Matemáticas..."
-                    value={subject}
-                    onChange={(e) => setSubject(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
                   />
                 </div>
@@ -222,6 +217,22 @@ export const AuthModal: React.FC = () => {
             )}
           </button>
         </form>
+
+
+        {/* Opción de sembrar datos de ejemplo en Firestore si ya está autenticado */}
+        {currentUser && !isDemoMode && courses.length === 0 && (
+          <div className="pt-2 border-t border-slate-800 text-center">
+            <p className="text-[11px] text-slate-400 mb-2">¿Tu cuenta en Firebase está vacía?</p>
+            <button
+              onClick={handleSeedData}
+              disabled={seeding}
+              className="w-full py-2 px-3 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>{seeding ? 'Cargando datos...' : 'Cargar cursos y alumnos de ejemplo a mi Firestore'}</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

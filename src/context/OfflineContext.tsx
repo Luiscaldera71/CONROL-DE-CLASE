@@ -35,33 +35,18 @@ export const OfflineProvider: React.FC<{ children: React.ReactNode }> = ({ child
     window.addEventListener('offline', handleOffline);
     window.addEventListener('sync_queue_updated', handleQueueUpdate);
 
-    // Si arranca la app con conexión e items pendientes, sincronizar de inmediato
-    if (navigator.onLine && offlineStorage.getSyncQueue().length > 0) {
-      syncNow();
-    }
-
-    // Intervalo de respaldo cada 15 segundos
-    const timer = setInterval(() => {
-      if (navigator.onLine && offlineStorage.getSyncQueue().length > 0 && !isSyncing) {
-        syncNow();
-      }
-    }, 15000);
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('sync_queue_updated', handleQueueUpdate);
-      clearInterval(timer);
     };
   }, []);
 
   const syncNow = async () => {
-    if (!navigator.onLine || isSyncing) return;
-    const queue = offlineStorage.getSyncQueue();
-    if (queue.length === 0) return;
-
+    if (!navigator.onLine) return;
     setIsSyncing(true);
     try {
+      const queue = offlineStorage.getSyncQueue();
       // Procesar secuencialmente con Firestore
       for (const item of queue) {
         const synced = await syncQueueItemToFirestore(item);
