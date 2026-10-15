@@ -2,19 +2,19 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Perfil de docente: solo el propio docente puede leer y escribir su perfil
+    // Perfil de docente: lectura pública para mostrar datos del profesor y la institución en el portal estudiantil
     match /teachers/{teacherId} {
-      allow read, write: if request.auth != null && request.auth.uid == teacherId;
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == teacherId;
     }
     
-    // Colecciones asociadas al docente:
-    // courses, students, activities, submissions, attendanceSessions, behaviorRecords, observations
+    // Colecciones asociadas a cursos y estudiantes:
+    // Lectura pública para consulta de estudiantes mediante código QR
+    // Escritura restringida estrictamente al docente autenticado dueño del registro
     match /{collectionName}/{docId} {
-      allow read, write: if request.auth != null && (
-        resource == null || 
-        resource.data.teacherId == request.auth.uid || 
-        request.resource.data.teacherId == request.auth.uid
-      );
+      allow read: if true;
+      allow create: if request.auth != null && request.resource.data.teacherId == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.teacherId == request.auth.uid;
     }
   }
 }

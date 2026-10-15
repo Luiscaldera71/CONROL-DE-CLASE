@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
 import { Student } from '../types';
+import { getStudentPortalUrl } from '../utils/codeGenerator';
 
 export const pdfService = {
   /**
@@ -81,7 +82,7 @@ export const pdfService = {
 
       // 3. Generar y dibujar código QR nítido
       try {
-        const qrDataUrl = await QRCode.toDataURL(`AC:${student.uniqueCode}`, {
+        const qrDataUrl = await QRCode.toDataURL(getStudentPortalUrl(student.uniqueCode), {
           errorCorrectionLevel: 'M',
           margin: 0,
           width: 200,

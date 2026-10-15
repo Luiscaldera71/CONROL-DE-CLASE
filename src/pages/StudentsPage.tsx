@@ -22,6 +22,7 @@ import { useToast } from '../context/ToastContext';
 import { excelService } from '../services/excelService';
 import { Student } from '../types';
 import { StudentImportModal } from '../components/students/StudentImportModal';
+import { getStudentPortalUrl } from '../utils/codeGenerator';
 
 export const StudentsPage: React.FC = () => {
   const { courses, selectCourse, students, activeCourse, addStudent, updateStudent, deleteStudent } = useCourse();
@@ -276,7 +277,7 @@ export const StudentsPage: React.FC = () => {
 
             <div className="bg-white p-4 rounded-2xl inline-block border border-slate-100 shadow-sm mb-3">
               <QRCodeSVG
-                value={`AC:${selectedQRStudent.uniqueCode}`}
+                value={getStudentPortalUrl(selectedQRStudent.uniqueCode)}
                 size={180}
                 level="M"
                 includeMargin={false}

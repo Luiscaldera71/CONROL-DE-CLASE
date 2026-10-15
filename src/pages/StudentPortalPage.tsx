@@ -23,7 +23,8 @@ import {
   ExternalLink,
   ChevronRight,
   TrendingUp,
-  FileText
+  FileText,
+  Loader2
 } from 'lucide-react';
 import { useCourse } from '../context/CourseContext';
 import { useToast } from '../context/ToastContext';
@@ -31,6 +32,7 @@ import { Student, Course, Activity, Submission, AttendanceSession, BehaviorRecor
 import { cleanQRCode, playFeedbackTone, getStudentPortalUrl } from '../utils/codeGenerator';
 import { formatColombiaFullDate, getDayNameFromDateString, getColombiaDateString } from '../utils/dateUtils';
 import { calculateStudentWeightedAverage } from '../utils/gradeUtils';
+import { fetchStudentByCode, fetchStudentPortalData, StudentPortalData } from '../services/firestoreService';
 
 export const StudentPortalPage: React.FC = () => {
   const { code: routeCode } = useParams<{ code?: string }>();
@@ -49,67 +51,122 @@ export const StudentPortalPage: React.FC = () => {
     observations: contextObservations
   } = useCourse();
 
-  // Usar exclusivamente los datos reales de la institución y cursos
-  const allStudents: Student[] = contextStudents;
-  const allCourses: Course[] = contextCourses;
-  const allActivities: Activity[] = contextActivities;
-  const allSubmissions: Submission[] = contextSubmissions;
-  const allAttendance: AttendanceSession[] = contextAttendance;
-  const allBehaviors: BehaviorRecord[] = contextBehaviors;
-  const allObservations: StudentObservation[] = contextObservations;
-
   const [inputCode, setInputCode] = useState('');
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [remotePortalData, setRemotePortalData] = useState<StudentPortalData | null>(null);
+  const [isLoadingPortal, setIsLoadingPortal] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'calificaciones' | 'asistencia' | 'convivencia' | 'carne'>('calificaciones');
   const [isCameraScanning, setIsCameraScanning] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
 
-  // Intentar cargar por código de URL al montar
-  useEffect(() => {
-    const codeToSearch = routeCode || queryCode;
-    if (codeToSearch) {
-      findAndSetStudent(codeToSearch);
-    }
-  }, [routeCode, queryCode, allStudents]);
+  // Combinar datos locales y remotos para el portal
+  const allStudents: Student[] = remotePortalData?.student
+    ? [remotePortalData.student, ...contextStudents.filter(s => s.id !== remotePortalData.student.id)]
+    : contextStudents;
 
-  const findAndSetStudent = (rawQuery: string): boolean => {
+  const allCourses: Course[] = remotePortalData?.course
+    ? [remotePortalData.course, ...contextCourses.filter(c => c.id !== remotePortalData.course?.id)]
+    : contextCourses;
+
+  const allActivities: Activity[] = remotePortalData?.activities?.length
+    ? remotePortalData.activities
+    : contextActivities;
+
+  const allSubmissions: Submission[] = remotePortalData?.submissions?.length
+    ? remotePortalData.submissions
+    : contextSubmissions;
+
+  const allAttendance: AttendanceSession[] = remotePortalData?.attendanceSessions?.length
+    ? remotePortalData.attendanceSessions
+    : contextAttendance;
+
+  const allBehaviors: BehaviorRecord[] = remotePortalData?.behaviorRecords?.length
+    ? remotePortalData.behaviorRecords
+    : contextBehaviors;
+
+  const allObservations: StudentObservation[] = remotePortalData?.observations?.length
+    ? remotePortalData.observations
+    : contextObservations;
+
+  const searchAndSetStudent = async (rawQuery: string): Promise<boolean> => {
     const clean = cleanQRCode(rawQuery).trim().toUpperCase();
     if (!clean) return false;
 
-    // 1. Buscar coincidencia exacta por uniqueCode
+    // 1. Buscar coincidencia local si existe (ej. pruebas en la misma computadora o docente)
     let found = allStudents.find(s => (s.uniqueCode || '').toUpperCase() === clean);
-
-    // 2. Buscar por documento si no se encontró
     if (!found) {
       found = allStudents.find(s => s.documentNumber && s.documentNumber.trim().toUpperCase() === clean);
     }
-
-    // 3. Buscar por ID directo
     if (!found) {
       found = allStudents.find(s => s.id === clean);
     }
-
-    // 4. Buscar por nombre si la consulta tiene al menos 3 caracteres
     if (!found && clean.length >= 3) {
       found = allStudents.find(s => s.fullName.toUpperCase().includes(clean));
     }
 
     if (found) {
       setSelectedStudent(found);
+      try {
+        localStorage.setItem('student_portal_saved_code', found.uniqueCode || clean);
+      } catch {}
       playFeedbackTone('success');
       return true;
+    }
+
+    // 2. Si no está en datos locales (p.ej. teléfono del estudiante sin sesión docente),
+    // consultar directamente a Firestore por el código QR
+    setIsLoadingPortal(true);
+    try {
+      const remoteStudent = await fetchStudentByCode(clean);
+      if (remoteStudent) {
+        const portalData = await fetchStudentPortalData(remoteStudent);
+        setRemotePortalData(portalData);
+        setSelectedStudent(portalData.student);
+        try {
+          localStorage.setItem('student_portal_saved_code', portalData.student.uniqueCode || clean);
+        } catch {}
+        playFeedbackTone('success');
+        setIsLoadingPortal(false);
+        return true;
+      }
+    } catch (err) {
+      console.error('Error consultando estudiante en Firestore:', err);
+    } finally {
+      setIsLoadingPortal(false);
     }
 
     return false;
   };
 
-  const handleManualSearch = (e: React.FormEvent) => {
+  // Intentar cargar por código de URL al montar, o por código guardado en localStorage
+  useEffect(() => {
+    const codeFromUrl = routeCode || queryCode;
+    const savedCode = (() => {
+      try {
+        return localStorage.getItem('student_portal_saved_code') || '';
+      } catch {
+        return '';
+      }
+    })();
+
+    const codeToSearch = codeFromUrl || savedCode;
+    if (codeToSearch) {
+      setInputCode(codeToSearch);
+      searchAndSetStudent(codeToSearch).then((found) => {
+        if (!found && codeFromUrl) {
+          showToast(`No se encontró estudiante con código "${cleanQRCode(codeFromUrl)}"`, 'error');
+        }
+      });
+    }
+  }, [routeCode, queryCode]);
+
+  const handleManualSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputCode.trim()) return;
 
-    const found = findAndSetStudent(inputCode);
+    const found = await searchAndSetStudent(inputCode);
     if (!found) {
       showToast('Estudiante no encontrado. Verifica el código o escanea el QR.', 'error');
     }
@@ -132,8 +189,8 @@ export const StudentPortalPage: React.FC = () => {
             qrbox: { width: 240, height: 240 },
             aspectRatio: 1.0
           },
-          (decodedText) => {
-            const success = findAndSetStudent(decodedText);
+          async (decodedText) => {
+            const success = await searchAndSetStudent(decodedText);
             if (success) {
               stopCamera();
               showToast('✓ Carné detectado exitosamente', 'success');
@@ -172,12 +229,13 @@ export const StudentPortalPage: React.FC = () => {
 
   // Datos del estudiante seleccionado
   const studentCourse = selectedStudent
-    ? allCourses.find(c => c.id === selectedStudent.courseId) || {
-        name: 'Curso Activo',
+    ? allCourses.find(c => c.id === selectedStudent.courseId) || remotePortalData?.course || {
+        name: 'Curso Asignado',
         gradeLevel: 'Grado General',
         group: 'A',
         academicYear: 2026,
-        scheduleDays: ['Lunes', 'Miércoles']
+        scheduleDays: ['Lunes', 'Miércoles'],
+        institution: remotePortalData?.teacher?.institution || 'Institución Educativa'
       }
     : null;
 
@@ -269,9 +327,14 @@ export const StudentPortalPage: React.FC = () => {
                 type="button"
                 onClick={() => {
                   setSelectedStudent(null);
+                  setRemotePortalData(null);
                   setInputCode('');
+                  try {
+                    localStorage.removeItem('student_portal_saved_code');
+                  } catch {}
+                  navigate('/estudiante', { replace: true });
                 }}
-                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all flex items-center gap-1.5"
+                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Cambiar Estudiante</span>
@@ -281,7 +344,7 @@ export const StudentPortalPage: React.FC = () => {
             <button
               type="button"
               onClick={() => navigate('/')}
-              className="px-3 py-1.5 rounded-xl border border-blue-200 hover:bg-blue-50 text-blue-600 text-xs font-bold transition-all flex items-center gap-1.5"
+              className="px-3 py-1.5 rounded-xl border border-blue-200 hover:bg-blue-50 text-blue-600 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <span>Acceso Docente</span>
               <ChevronRight className="w-3.5 h-3.5" />
@@ -291,10 +354,21 @@ export const StudentPortalPage: React.FC = () => {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-6">
-        {/* ========================================================
-            VISTA 1: BÚSQUEDA / INGRESO DE CÓDIGO (SI NO ESTÁ SELECCIONADO)
-           ======================================================== */}
-        {!selectedStudent ? (
+        {isLoadingPortal ? (
+          <div className="max-w-md mx-auto text-center py-20 space-y-4">
+            <div className="w-16 h-16 rounded-3xl bg-blue-50 border border-blue-200 flex items-center justify-center mx-auto text-blue-600 shadow-sm">
+              <Loader2 className="w-8 h-8 animate-spin" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base font-extrabold text-slate-900">
+                Cargando Perfil Estudiantil
+              </h3>
+              <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                Conectando con la base de datos institucional para cargar tus calificaciones y asistencias...
+              </p>
+            </div>
+          </div>
+        ) : !selectedStudent ? (
           <div className="max-w-md mx-auto space-y-6 pt-4">
             <div className="text-center space-y-2">
               <div className="w-16 h-16 rounded-3xl bg-blue-50 border border-blue-200 flex items-center justify-center mx-auto text-blue-600 shadow-sm">
@@ -412,6 +486,9 @@ export const StudentPortalPage: React.FC = () => {
                   </div>
 
                   <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    {(studentCourse?.institution || remotePortalData?.teacher?.institution) ? (
+                      <span className="text-slate-600 font-semibold">{studentCourse?.institution || remotePortalData?.teacher?.institution} • </span>
+                    ) : null}
                     {studentCourse?.name || 'Curso Asignado'} {studentCourse?.gradeLevel ? `(${studentCourse.gradeLevel})` : ''} • Código: <strong className="text-blue-600 font-mono">{selectedStudent.uniqueCode}</strong>
                   </p>
                 </div>
