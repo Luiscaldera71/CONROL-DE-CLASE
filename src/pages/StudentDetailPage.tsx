@@ -333,17 +333,18 @@ export const StudentDetailPage: React.FC = () => {
             ) : (
               attendanceSessions.map(session => {
                 const rec = session.records[student.id];
-                const st = rec?.status || 'present';
+                const st = rec?.status;
 
                 return (
                   <div key={session.id} className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl flex items-center justify-between text-xs">
                     <span className="text-slate-700 font-semibold">Clase del {session.date}</span>
                     <span className={`px-2.5 py-0.5 rounded-lg font-bold text-[10px] ${
+                      !st ? 'text-slate-500 bg-slate-100 border border-slate-200' :
                       st === 'present' ? 'text-emerald-700 bg-emerald-50 border border-emerald-200' :
                       st === 'absent' ? 'text-rose-700 bg-rose-50 border border-rose-200' :
                       st === 'late' ? 'text-amber-700 bg-amber-50 border border-amber-200' : 'text-blue-700 bg-blue-50 border border-blue-200'
                     }`}>
-                      {st.toUpperCase()}
+                      {st ? st.toUpperCase() : 'SIN MARCAR'}
                     </span>
                   </div>
                 );

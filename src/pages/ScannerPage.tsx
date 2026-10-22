@@ -20,7 +20,7 @@ import { getLocalDateString } from '../utils/dateUtils';
 import { QuickActionModal } from '../components/qr/QuickActionModal';
 
 export const ScannerPage: React.FC = () => {
-  const { students, courses, activeCourse, selectCourse, getStudentByCode, recordAttendance, getTodaySession } = useCourse();
+  const { students, courses, activeCourse, selectCourse, getStudentByCode, recordAttendance, recordAttendanceBulk, getTodaySession } = useCourse();
   const { showToast } = useToast();
 
   const [isScanning, setIsScanning] = useState(false);
@@ -31,12 +31,7 @@ export const ScannerPage: React.FC = () => {
   
   // Modo Asistencia Rápida
   const [isRapidMode, setIsRapidMode] = useState(false);
-  const [rapidSessionStats, setRapidSessionStats] = useState<{
-    present: number;
-    absent: number;
-    late: number;
-    lastStudentName?: string;
-  }>({ present: 0, absent: 0, late: 0 });
+  const [rapidSessionStats, setRapidSessionStats] = useState<{ lastStudentName?: string }>({});
   const [showRapidSummary, setShowRapidSummary] = useState(false);
 
   // Manual fallback search
@@ -46,6 +41,7 @@ export const ScannerPage: React.FC = () => {
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
   const lastScannedTimeRef = useRef<number>(0);
   const lastScannedCodeRef = useRef<string>('');
+  const onScanSuccessRef = useRef<(text: string) => void>(() => {});
 
   const today = getLocalDateString();
 
@@ -70,7 +66,8 @@ export const ScannerPage: React.FC = () => {
           qrbox: { width: 250, height: 250 },
           aspectRatio: 1.0
         },
-        onScanSuccess,
+        // Siempre la versión más reciente del handler (evita closures obsoletos: modo rápido, estudiantes, curso)
+        (text: string) => onScanSuccessRef.current(text),
         () => {} // Ignorar frames vacíos
       );
 
@@ -145,19 +142,23 @@ export const ScannerPage: React.FC = () => {
     triggerHapticFeedback();
 
     if (isRapidMode) {
+      // No degradar a "presente" a quien ya estaba marcado como tarde/excusa hoy
+      const existing = getTodaySession()?.records[found.id];
+      const keepStatus = existing && existing.status !== 'absent' ? existing.status : 'present';
+      if (!recordAttendance(today, found.id, keepStatus, 'qr')) {
+        playFeedbackTone('alert');
+        showToast('Hoy no es día de clase de este curso: no se puede tomar asistencia.', 'warning');
+        return;
+      }
       playFeedbackTone('rapid');
-      recordAttendance(today, found.id, 'present', 'qr');
-      setRapidSessionStats(prev => ({
-        ...prev,
-        present: prev.present + 1,
-        lastStudentName: found.fullName
-      }));
-      showToast(`✓ Presente: #${found.listNumber} ${found.fullName}`, 'success');
+      setRapidSessionStats(prev => ({ ...prev, lastStudentName: found.fullName }));
+      showToast(`✓ ${keepStatus === 'present' ? 'Presente' : 'Ya registrado'}: #${found.listNumber} ${found.fullName}`, 'success');
     } else {
       playFeedbackTone('success');
       setScannedStudent(found);
     }
   };
+  onScanSuccessRef.current = onScanSuccess;
 
   const handleManualSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -174,16 +175,27 @@ export const ScannerPage: React.FC = () => {
     }
   };
 
+  // Conteo real de hoy a partir de los registros (los que no tienen registro = sin marcar)
+  const todayRecords = getTodaySession()?.records || {};
+  const todayCounts = { present: 0, absent: 0, late: 0, excused: 0, unmarked: 0 };
+  students.forEach(s => {
+    const st = todayRecords[s.id]?.status;
+    if (st) todayCounts[st]++;
+    else todayCounts.unmarked++;
+  });
+
   const finishRapidSession = () => {
-    const todaySession = getTodaySession();
-    if (todaySession) {
-      setRapidSessionStats({
-        present: todaySession.summary.present,
-        absent: todaySession.summary.absent,
-        late: todaySession.summary.late
-      });
-    }
     setShowRapidSummary(true);
+  };
+
+  // Cierra la lista: quienes no pasaron por el escáner quedan ausentes
+  const markUnmarkedAbsent = () => {
+    const pending = students.filter(s => !todayRecords[s.id]);
+    if (pending.length > 0) {
+      const ok = recordAttendanceBulk(today, pending.map(s => ({ studentId: s.id, status: 'absent' as const })), 'manual');
+      if (ok) showToast(`✓ ${pending.length} estudiante(s) marcados como ausentes`, 'success');
+      else showToast('Hoy no es día de clase de este curso: no se puede tomar asistencia.', 'warning');
+    }
   };
 
   return (
@@ -405,26 +417,35 @@ export const ScannerPage: React.FC = () => {
               Resumen para {activeCourse?.name} ({students.length} estudiantes)
             </p>
 
-            <div className="grid grid-cols-3 gap-2 bg-slate-50 p-4 rounded-2xl border border-slate-200 mb-5">
+            <div className="grid grid-cols-3 gap-2 bg-slate-50 p-4 rounded-2xl border border-slate-200 mb-3">
               <div>
                 <div className="text-xl font-black text-emerald-600">
-                  {rapidSessionStats.present}
+                  {todayCounts.present + todayCounts.excused}
                 </div>
                 <div className="text-[10px] font-bold text-slate-500 uppercase mt-0.5">Presentes</div>
               </div>
               <div>
                 <div className="text-xl font-black text-rose-600">
-                  {students.length - rapidSessionStats.present - rapidSessionStats.late}
+                  {todayCounts.absent + todayCounts.unmarked}
                 </div>
                 <div className="text-[10px] font-bold text-slate-500 uppercase mt-0.5">Ausentes</div>
               </div>
               <div>
                 <div className="text-xl font-black text-amber-500">
-                  {rapidSessionStats.late}
+                  {todayCounts.late}
                 </div>
                 <div className="text-[10px] font-bold text-slate-500 uppercase mt-0.5">Tardes</div>
               </div>
             </div>
+
+            {todayCounts.unmarked > 0 && (
+              <button
+                onClick={markUnmarkedAbsent}
+                className="w-full mb-3 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-2xl text-xs font-bold active:scale-95 transition-all"
+              >
+                Registrar {todayCounts.unmarked} sin escanear como ausentes
+              </button>
+            )}
 
             <button
               onClick={() => {

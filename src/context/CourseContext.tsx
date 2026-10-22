@@ -3,7 +3,8 @@ import { Course, Student, Activity, Submission, AttendanceSession, BehaviorRecor
 import { DEMO_COURSES, DEMO_STUDENTS, DEMO_ACTIVITIES, DEMO_SUBMISSIONS, DEMO_ATTENDANCE_SESSIONS, DEMO_BEHAVIORS } from '../services/mockData';
 import { offlineStorage } from '../services/offlineStorage';
 import { generateStudentCode, cleanQRCode } from '../utils/codeGenerator';
-import { getLocalDateString, getColombiaDateString } from '../utils/dateUtils';
+import { getLocalDateString, getColombiaDateString, getDayNameFromDateString } from '../utils/dateUtils';
+import { getAttendanceAccess } from '../utils/attendanceUtils';
 import { useAuth } from './AuthContext';
 import {
   setFirestoreDoc,
@@ -45,7 +46,8 @@ interface CourseContextType {
   recordSubmission: (activityId: string, studentId: string, status: Submission['status'], grade?: number | null, feedback?: string) => void;
 
   // Acciones Asistencia
-  recordAttendance: (date: string, studentId: string, status: AttendanceStatus, source?: 'qr' | 'manual') => void;
+  recordAttendance: (date: string, studentId: string, status: AttendanceStatus, source?: 'qr' | 'manual') => boolean;
+  recordAttendanceBulk: (date: string, entries: { studentId: string; status: AttendanceStatus }[], source?: 'qr' | 'manual', courseId?: string) => boolean;
   getTodaySession: () => AttendanceSession | undefined;
 
   // Acciones Comportamiento y Observación
@@ -541,76 +543,89 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
   };
 
+  // Copia siempre actualizada de las sesiones: permite aplicar varios registros seguidos
+  // (escaneos rápidos, "marcar todos") sin perder ninguno ni repetir escrituras en Firestore.
+  const attendanceRef = useRef<AttendanceSession[]>(attendanceSessions);
+  attendanceRef.current = attendanceSessions;
+
+  const recordAttendanceBulk = (
+    date: string,
+    entries: { studentId: string; status: AttendanceStatus }[],
+    source: 'qr' | 'manual' = 'manual',
+    courseId?: string
+  ) => {
+    // courseId permite registrar en el curso del estudiante escaneado aunque el cambio de curso activo aún no se haya aplicado
+    const targetCourse = (courseId && courses.find(c => c.id === courseId)) || activeCourse;
+    if (!targetCourse || entries.length === 0) return false;
+
+    // Solo se toma asistencia en días de clase (y nunca a futuro); una lista ya existente sí se puede corregir
+    const hasSession = attendanceRef.current.some(s => s.courseId === targetCourse.id && s.date === date);
+    const access = getAttendanceAccess(targetCourse.scheduleDays, date, getDayNameFromDateString(date), getColombiaDateString(), hasSession);
+    if (!access.allowed) return false;
+
+    const teacherId = (!isDemoMode && currentUser?.uid) ? currentUser.uid : 'teacher-demo';
+    const now = new Date().toISOString();
+
+    const courseStudents = students.filter(s => s.courseId === targetCourse.id && s.active !== false);
+    const prev = attendanceRef.current;
+    const sessionIdx = prev.findIndex(s => s.courseId === targetCourse.id && s.date === date);
+    const base: AttendanceSession = sessionIdx >= 0
+      ? prev[sessionIdx]
+      : {
+          id: `att-${targetCourse.id}-${date}`,
+          courseId: targetCourse.id,
+          date,
+          period: targetCourse.currentPeriod,
+          records: {},
+          summary: { present: 0, absent: 0, late: 0, excused: 0, total: courseStudents.length },
+          createdAt: now
+        };
+
+    const records = { ...base.records };
+    entries.forEach(({ studentId, status }) => {
+      records[studentId] = { studentId, status, timestamp: now, source };
+    });
+
+    // Resumen: solo estudiantes activos del curso (ignora retirados)
+    const activeIds = new Set(courseStudents.map(s => s.id));
+    let present = 0, absent = 0, late = 0, excused = 0;
+    Object.values(records).forEach(r => {
+      if (!activeIds.has(r.studentId)) return;
+      if (r.status === 'present') present++;
+      else if (r.status === 'absent') absent++;
+      else if (r.status === 'late') late++;
+      else if (r.status === 'excused') excused++;
+    });
+
+    const session: AttendanceSession = {
+      ...base,
+      records,
+      summary: { present, absent, late, excused, total: courseStudents.length },
+      updatedAt: now
+    };
+
+    const next = sessionIdx >= 0
+      ? prev.map((s, i) => (i === sessionIdx ? session : s))
+      : [...prev, session];
+    attendanceRef.current = next;
+    setAttendanceSessions(next);
+
+    if (!isDemoMode && currentUser?.uid) {
+      setFirestoreDoc('attendanceSessions', session.id, { ...session, teacherId }).catch(err => {
+        console.warn('Error guardando asistencia en Firestore:', err);
+        offlineStorage.addToSyncQueue({ action: 'update', collection: 'attendanceSessions', data: { ...session, teacherId } });
+      });
+    }
+    return true;
+  };
+
   const recordAttendance = (
     date: string,
     studentId: string,
     status: AttendanceStatus,
     source: 'qr' | 'manual' = 'manual'
   ) => {
-    if (!activeCourse) return;
-    const teacherId = (!isDemoMode && currentUser?.uid) ? currentUser.uid : 'teacher-demo';
-
-    setAttendanceSessions(prev => {
-      const sessionIdx = prev.findIndex(s => s.courseId === activeCourse.id && s.date === date);
-      let session: AttendanceSession;
-
-      if (sessionIdx >= 0) {
-        session = { ...prev[sessionIdx] };
-      } else {
-        session = {
-          id: `att-${activeCourse.id}-${date}`,
-          courseId: activeCourse.id,
-          date,
-          period: activeCourse.currentPeriod,
-          records: {},
-          summary: { present: 0, absent: 0, late: 0, excused: 0, total: activeStudents.length },
-          createdAt: new Date().toISOString()
-        };
-      }
-
-      session.records = {
-        ...session.records,
-        [studentId]: {
-          studentId,
-          status,
-          timestamp: new Date().toISOString(),
-          source
-        }
-      };
-
-      // Recalcular resumen
-      let present = 0, absent = 0, late = 0, excused = 0;
-      Object.values(session.records).forEach(r => {
-        if (r.status === 'present') present++;
-        else if (r.status === 'absent') absent++;
-        else if (r.status === 'late') late++;
-        else if (r.status === 'excused') excused++;
-      });
-
-      session.summary = {
-        present,
-        absent,
-        late,
-        excused,
-        total: activeStudents.length
-      };
-
-      session.updatedAt = new Date().toISOString();
-
-      if (!isDemoMode && currentUser?.uid) {
-        setFirestoreDoc('attendanceSessions', session.id, { ...session, teacherId }).catch(err => {
-          console.warn('Error guardando asistencia en Firestore:', err);
-          offlineStorage.addToSyncQueue({ action: 'update', collection: 'attendanceSessions', data: { ...session, teacherId } });
-        });
-      }
-
-      if (sessionIdx >= 0) {
-        const copy = [...prev];
-        copy[sessionIdx] = session;
-        return copy;
-      }
-      return [...prev, session];
-    });
+    return recordAttendanceBulk(date, [{ studentId, status }], source, students.find(s => s.id === studentId)?.courseId);
   };
 
   const getTodaySession = (): AttendanceSession | undefined => {
@@ -727,6 +742,7 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         deleteActivity,
         recordSubmission,
         recordAttendance,
+        recordAttendanceBulk,
         getTodaySession,
         addBehaviorRecord,
         addObservation,

@@ -21,6 +21,7 @@ import { useCourse } from '../context/CourseContext';
 import { useAuth } from '../context/AuthContext';
 import { calculateStudentRisk } from '../utils/riskEngine';
 import { calculateStudentWeightedAverage } from '../utils/gradeUtils';
+import { ATTENDANCE_WEIGHTS, getStudentAttendanceStats } from '../utils/attendanceUtils';
 import { getLocalDateString, getColombiaDayName, formatColombiaFullDate, formatTime12h } from '../utils/dateUtils';
 
 export const HomePage: React.FC = () => {
@@ -62,11 +63,12 @@ export const HomePage: React.FC = () => {
   // Asistencia del curso
   let totalAttendances = 0;
   let presentAttendances = 0;
+  const activeStudentIds = new Set(students.map(s => s.id));
   attendanceSessions.forEach(session => {
     Object.values(session.records).forEach(r => {
+      if (!activeStudentIds.has(r.studentId)) return;
       totalAttendances++;
-      if (r.status === 'present' || r.status === 'excused') presentAttendances++;
-      else if (r.status === 'late') presentAttendances += 0.8;
+      presentAttendances += ATTENDANCE_WEIGHTS[r.status];
     });
   });
   const attendanceRate = totalAttendances > 0
@@ -95,18 +97,7 @@ export const HomePage: React.FC = () => {
       countWithDefinitiva++;
 
       // Asistencia del estudiante
-      let pres = 0;
-      attendanceSessions.forEach(sess => {
-        const rec = sess.records[student.id];
-        if (rec) {
-          if (rec.status === 'present') pres++;
-          else if (rec.status === 'late') pres += 0.5;
-          else if (rec.status === 'excused') pres += 0.8;
-        }
-      });
-      const stAttRate = attendanceSessions.length > 0
-        ? Math.min(100, Math.round((pres / attendanceSessions.length) * 100))
-        : 100;
+      const stAttRate = getStudentAttendanceStats(attendanceSessions, student.id).rate;
       const stAttGrade = parseFloat(((stAttRate / 100) * 5.0).toFixed(1));
 
       // Convivencia: ajuste directo por décimas (+0.1, +0.2, -0.1, -0.2)

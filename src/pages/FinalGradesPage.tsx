@@ -26,6 +26,7 @@ import { excelService } from '../services/excelService';
 import { Student, ComponentWeights } from '../types';
 import { calculateStudentWeightedAverage } from '../utils/gradeUtils';
 import { getColombiaDateString } from '../utils/dateUtils';
+import { getStudentAttendanceStats } from '../utils/attendanceUtils';
 
 const DEFAULT_WEIGHTS: ComponentWeights = {
   academic: 0.85,
@@ -103,25 +104,8 @@ export const FinalGradesPage: React.FC = () => {
     const deliveredCount = studentSubs.filter(sub => sub.status === 'delivered').length;
 
     // 2. Asistencia (Nota de 0.0 a 5.0 según porcentaje asistido)
-    let presentCount = 0;
-    let absentCount = 0;
-    let lateCount = 0;
-    let excusedCount = 0;
-
-    attendanceSessions.forEach(sess => {
-      const rec = sess.records[student.id];
-      if (rec) {
-        if (rec.status === 'present') presentCount++;
-        else if (rec.status === 'late') { lateCount++; presentCount += 0.5; }
-        else if (rec.status === 'excused') { excusedCount++; presentCount += 0.8; }
-        else if (rec.status === 'absent') absentCount++;
-      }
-    });
-
-    const hasAttendanceSessions = attendanceSessions.length > 0;
-    const attendanceRate = hasAttendanceSessions
-      ? Math.min(100, Math.round((presentCount / attendanceSessions.length) * 100))
-      : 100;
+    const attStats = getStudentAttendanceStats(attendanceSessions, student.id);
+    const { absent: absentCount, late: lateCount, excused: excusedCount, rate: attendanceRate } = attStats;
     const attendanceGrade = parseFloat(((attendanceRate / 100) * 5.0).toFixed(1));
 
     // 3. Convivencia (Ajuste directo de décimas a la definitiva)
@@ -218,7 +202,7 @@ export const FinalGradesPage: React.FC = () => {
       absentCount,
       lateCount,
       excusedCount,
-      presentCount: Math.floor(presentCount),
+      presentCount: attStats.present + attStats.excused + attStats.late,
       convivenciaAdjustment,
       positiveCount: aporteCount + reconocimientoCount,
       negativeCount: llamadoAtencionCount + incumplimientoCount,

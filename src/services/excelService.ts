@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx-js-style';
 import { Student, AttendanceSession, Activity, Submission, BehaviorRecord, Course } from '../types';
 import { calculateStudentWeightedAverage } from '../utils/gradeUtils';
 import { getColombiaDateString } from '../utils/dateUtils';
+import { ATTENDANCE_WEIGHTS, getStudentAttendanceStats } from '../utils/attendanceUtils';
 
 export interface ParsedStudentRow {
   listNumber?: number;
@@ -778,15 +779,18 @@ export const excelService = {
       ws[`C${currentRow}`] = { t: 's', v: s.uniqueCode, s: baseCenter };
 
       let pCount = 0;
+      let markedCount = 0;
       sessions.forEach((sess, idx) => {
         const colLetter = colToLetter(3 + idx);
         const rec = sess.records[s.id];
         let val = '—';
         if (rec) {
-          if (rec.status === 'present') { val = 'P'; pCount++; }
-          else if (rec.status === 'late') { val = 'T'; pCount += 0.5; }
-          else if (rec.status === 'excused') { val = 'E'; pCount += 0.8; }
+          if (rec.status === 'present') { val = 'P'; }
+          else if (rec.status === 'late') { val = 'T'; }
+          else if (rec.status === 'excused') { val = 'E'; }
           else if (rec.status === 'absent') { val = 'A'; }
+          pCount += ATTENDANCE_WEIGHTS[rec.status];
+          markedCount++;
         }
         ws[`${colLetter}${currentRow}`] = { t: 's', v: val, s: baseCenter };
       });
@@ -795,18 +799,20 @@ export const excelService = {
         const firstSessCol = colToLetter(3);
         const lastSessCol = colToLetter(3 + sessions.length - 1);
 
-        // Fórmulas Vivas
+        // Fórmulas Vivas (P y E suman 1, T suma 0.8, A suma 0; las celdas "—" no cuentan)
+        const rng = `${firstSessCol}${currentRow}:${lastSessCol}${currentRow}`;
         ws[`${colPresentes}${currentRow}`] = {
           t: 'n',
-          f: `COUNTIF(${firstSessCol}${currentRow}:${lastSessCol}${currentRow}, "P")`,
-          v: Math.floor(pCount),
+          f: `COUNTIF(${rng}, "P")+COUNTIF(${rng}, "E")+0.8*COUNTIF(${rng}, "T")`,
+          v: parseFloat(pCount.toFixed(1)),
           s: STYLES.cellAverage
         };
 
+        const markedFormula = `(COUNTIF(${rng}, "P")+COUNTIF(${rng}, "E")+COUNTIF(${rng}, "T")+COUNTIF(${rng}, "A"))`;
         ws[`${colPorcentaje}${currentRow}`] = {
           t: 'n',
-          f: `ROUND((${colPresentes}${currentRow}/${sessions.length})*100, 0)`,
-          v: Math.round((pCount / sessions.length) * 100),
+          f: `IF(${markedFormula}=0, 100, ROUND((${colPresentes}${currentRow}/${markedFormula})*100, 0))`,
+          v: markedCount > 0 ? Math.round((pCount / markedCount) * 100) : 100,
           z: '0"%"',
           s: STYLES.cellDesempeno
         };
@@ -929,20 +935,9 @@ export const excelService = {
       const deliveredCount = studentSubs.filter(sub => sub.status === 'delivered').length;
 
       // 2. Datos de Asistencia
-      let presentCount = 0;
-      let absentCount = 0;
-      attendanceSessions.forEach(sess => {
-        const rec = sess.records[s.id];
-        if (rec) {
-          if (rec.status === 'present') presentCount++;
-          else if (rec.status === 'late') presentCount += 0.5;
-          else if (rec.status === 'excused') presentCount += 0.8;
-          else if (rec.status === 'absent') absentCount++;
-        }
-      });
-      const attendanceRate = attendanceSessions.length > 0
-        ? Math.round((presentCount / attendanceSessions.length) * 100)
-        : 100;
+      const attStats = getStudentAttendanceStats(attendanceSessions, s.id);
+      const absentCount = attStats.absent;
+      const attendanceRate = attStats.rate;
       const attendanceGrade = parseFloat(((attendanceRate / 100) * 5.0).toFixed(1));
 
       // 3. Convivencia (Ajuste directo de décimas: +0.1 aporte, +0.2 reconocimiento, -0.1 llamado, -0.2 incumplimiento)

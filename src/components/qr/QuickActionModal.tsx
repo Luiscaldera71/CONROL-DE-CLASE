@@ -60,7 +60,10 @@ export const QuickActionModal: React.FC<QuickActionModalProps> = ({
 
   // Registrar Asistencia Directa
   const handleQuickAttendance = (status: AttendanceStatus) => {
-    recordAttendance(today, student.id, status, 'qr');
+    if (!recordAttendance(today, student.id, status, 'qr')) {
+      showToast('Hoy no es día de clase de este curso: no se puede tomar asistencia.', 'warning');
+      return;
+    }
     const statusLabels: Record<AttendanceStatus, string> = {
       present: 'Presente',
       absent: 'Ausente',

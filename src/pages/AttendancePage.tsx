@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   CalendarCheck2,
@@ -20,6 +20,7 @@ import { useCourse } from '../context/CourseContext';
 import { useToast } from '../context/ToastContext';
 import { excelService } from '../services/excelService';
 import { AttendanceStatus } from '../types';
+import { getAttendanceAccess } from '../utils/attendanceUtils';
 import {
   getColombiaDateString,
   getDayNameFromDateString,
@@ -29,7 +30,7 @@ import {
 } from '../utils/dateUtils';
 
 export const AttendancePage: React.FC = () => {
-  const { students, activeCourse, attendanceSessions, recordAttendance } = useCourse();
+  const { students, activeCourse, attendanceSessions, recordAttendance, recordAttendanceBulk } = useCourse();
   const { showToast } = useToast();
   const navigate = useNavigate();
 
@@ -57,19 +58,16 @@ export const AttendancePage: React.FC = () => {
   let lateCount = 0;
   let excusedCount = 0;
 
+  let unmarkedCount = 0;
+
   students.forEach(student => {
-    const rec = sessionRecords[student.id];
-    const status = rec?.status || 'present';
-    if (status === 'present') presentCount++;
+    const status = sessionRecords[student.id]?.status;
+    if (!status) unmarkedCount++;
+    else if (status === 'present') presentCount++;
     else if (status === 'absent') absentCount++;
     else if (status === 'late') lateCount++;
     else if (status === 'excused') excusedCount++;
   });
-
-  const total = students.length;
-  const attendanceRate = total > 0
-    ? Math.round(((presentCount + excusedCount + (lateCount * 0.8)) / total) * 100)
-    : 100;
 
   // Verificación del horario del curso según el día seleccionado
   const selectedDayName = getDayNameFromDateString(selectedDate);
@@ -77,15 +75,29 @@ export const AttendancePage: React.FC = () => {
   const isScheduledDay = scheduledDays.length === 0 || scheduledDays.includes(selectedDayName);
   const isToday = selectedDate === todayColombia;
 
+  const access = getAttendanceAccess(scheduledDays, selectedDate, selectedDayName, todayColombia, Boolean(currentSession));
+  const locked = !access.allowed;
+
   const handleStatusChange = (studentId: string, status: AttendanceStatus) => {
+    if (locked) {
+      showToast(access.reason, 'warning');
+      return;
+    }
     recordAttendance(selectedDate, studentId, status, 'manual');
   };
 
-  const markAllPresent = () => {
-    students.forEach(s => {
-      recordAttendance(selectedDate, s.id, 'present', 'manual');
-    });
-    showToast(`✓ Todos los estudiantes marcados como presentes`, 'success');
+  const unmarkedStudents = students.filter(s => !sessionRecords[s.id]);
+
+  // Solo afecta a quienes aún no tienen estado: no pisa ausentes/tardes ya marcados
+  const markUnmarked = (status: AttendanceStatus) => {
+    if (unmarkedStudents.length === 0 || locked) return;
+    recordAttendanceBulk(selectedDate, unmarkedStudents.map(s => ({ studentId: s.id, status })), 'manual');
+    showToast(
+      status === 'present'
+        ? `✓ ${unmarkedStudents.length} sin marcar quedaron como presentes`
+        : `✓ ${unmarkedStudents.length} sin marcar quedaron como ausentes`,
+      'success'
+    );
   };
 
   const handleExport = () => {
@@ -228,15 +240,44 @@ export const AttendancePage: React.FC = () => {
         </div>
       </div>
 
-      {/* BOTÓN RÁPIDO PARA MARCAR TODOS PRESENTES */}
-      <div className="flex justify-end">
-        <button
-          onClick={markAllPresent}
-          className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-50 border border-blue-200/80 active:scale-95 transition-all shadow-xs"
-        >
-          <Check className="w-3.5 h-3.5" />
-          <span>Marcar todos presentes</span>
-        </button>
+      {locked && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-3 text-xs font-bold">
+          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <span>{access.reason}</span>
+        </div>
+      )}
+      {!locked && !isToday && currentSession && (
+        <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 text-blue-800 rounded-2xl p-3 text-xs font-bold">
+          <AlertCircle className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+          <span>Estás corrigiendo la asistencia de una clase anterior (edición manual).</span>
+        </div>
+      )}
+
+      {/* ESTADO DE LA LISTA Y ATAJOS PARA LOS QUE AÚN NO TIENEN ESTADO */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <span className={`text-xs font-bold ${unmarkedCount > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+          {unmarkedCount > 0
+            ? `${unmarkedCount} de ${students.length} sin marcar`
+            : students.length > 0 ? '✓ Lista completa' : ''}
+        </span>
+        {unmarkedCount > 0 && !locked && (
+          <div className="flex items-center gap-2 flex-wrap sm:justify-end">
+            <button
+              onClick={() => markUnmarked('present')}
+              className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-50 border border-blue-200/80 active:scale-95 transition-all shadow-xs"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>Sin marcar → Presentes</span>
+            </button>
+            <button
+              onClick={() => markUnmarked('absent')}
+              className="text-xs text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-50 border border-rose-200/80 active:scale-95 transition-all shadow-xs"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              <span>Sin marcar → Ausentes</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ========================================================
@@ -250,7 +291,7 @@ export const AttendancePage: React.FC = () => {
         ) : (
           students.map(student => {
             const rec = sessionRecords[student.id];
-            const currentStatus: AttendanceStatus = rec?.status || 'present';
+            const currentStatus: AttendanceStatus | undefined = rec?.status;
 
             return (
               <div
@@ -279,6 +320,7 @@ export const AttendancePage: React.FC = () => {
                 <div className="grid grid-cols-4 gap-1.5 sm:flex sm:items-center shrink-0">
                   <button
                     type="button"
+                    disabled={locked}
                     onClick={() => handleStatusChange(student.id, 'present')}
                     className={`py-1.5 px-3 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
                       currentStatus === 'present'
@@ -291,6 +333,7 @@ export const AttendancePage: React.FC = () => {
 
                   <button
                     type="button"
+                    disabled={locked}
                     onClick={() => handleStatusChange(student.id, 'absent')}
                     className={`py-1.5 px-3 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
                       currentStatus === 'absent'
@@ -303,6 +346,7 @@ export const AttendancePage: React.FC = () => {
 
                   <button
                     type="button"
+                    disabled={locked}
                     onClick={() => handleStatusChange(student.id, 'late')}
                     className={`py-1.5 px-3 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
                       currentStatus === 'late'
@@ -315,6 +359,7 @@ export const AttendancePage: React.FC = () => {
 
                   <button
                     type="button"
+                    disabled={locked}
                     onClick={() => handleStatusChange(student.id, 'excused')}
                     className={`py-1.5 px-3 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
                       currentStatus === 'excused'
@@ -333,3 +378,4 @@ export const AttendancePage: React.FC = () => {
     </div>
   );
 };
+

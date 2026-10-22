@@ -1,6 +1,7 @@
 import { Student, Activity, Submission, AttendanceSession, RiskAlert, TeacherSettings } from '../types';
 import { calculateStudentWeightedAverage } from './gradeUtils';
 import { getColombiaDateString } from './dateUtils';
+import { getStudentAttendanceStats } from './attendanceUtils';
 
 export function calculateStudentRisk(
   student: Student,
@@ -19,24 +20,7 @@ export function calculateStudentRisk(
   );
 
   // 2. Cálculo de Asistencia
-  let totalSessions = 0;
-  let presentOrExcused = 0;
-
-  attendanceSessions.forEach(session => {
-    const record = session.records[student.id];
-    if (record) {
-      totalSessions++;
-      if (record.status === 'present' || record.status === 'excused') {
-        presentOrExcused++;
-      } else if (record.status === 'late') {
-        presentOrExcused += 0.8; // Tardanza cuenta como 80%
-      }
-    }
-  });
-
-  const attendanceRate = totalSessions > 0
-    ? Math.round((presentOrExcused / totalSessions) * 100)
-    : 100;
+  const { counted: totalSessions, rate: attendanceRate } = getStudentAttendanceStats(attendanceSessions, student.id);
 
   // Alerta de asistencia si tiene suficientes sesiones evaluadas
   const hasAttendanceRisk = totalSessions >= 3 && attendanceRate < minAttendanceRate;

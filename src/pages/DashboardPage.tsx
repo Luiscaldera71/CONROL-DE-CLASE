@@ -29,6 +29,7 @@ import { Bar, Line } from 'react-chartjs-2';
 import { useCourse } from '../context/CourseContext';
 import { useAuth } from '../context/AuthContext';
 import { calculateStudentRisk } from '../utils/riskEngine';
+import { ATTENDANCE_WEIGHTS } from '../utils/attendanceUtils';
 
 ChartJS.register(
   CategoryScale,
@@ -110,9 +111,10 @@ export const DashboardPage: React.FC = () => {
         fill: true,
         label: '% Asistencia',
         data: attendanceSessions.map(s => {
-          const total = s.summary.total || 1;
-          const present = s.summary.present + (s.summary.late * 0.8) + s.summary.excused;
-          return Math.round((present / total) * 100);
+          const marked = students.map(st => s.records[st.id]).filter(Boolean);
+          if (marked.length === 0) return 0;
+          const present = marked.reduce((sum, r) => sum + ATTENDANCE_WEIGHTS[r.status], 0);
+          return Math.round((present / marked.length) * 100);
         }),
         borderColor: '#2563eb',
         backgroundColor: 'rgba(37, 99, 235, 0.08)',

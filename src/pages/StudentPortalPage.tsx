@@ -280,7 +280,7 @@ export const StudentPortalPage: React.FC = () => {
 
   const totalClasses = presentCount + lateCount + absentCount + excusedCount;
   const attendanceRate = totalClasses > 0
-    ? Math.round(((presentCount + lateCount * 0.5) / totalClasses) * 100)
+    ? Math.round(((presentCount + excusedCount + lateCount * 0.8) / totalClasses) * 100)
     : 100;
 
   // Comportamientos y observaciones

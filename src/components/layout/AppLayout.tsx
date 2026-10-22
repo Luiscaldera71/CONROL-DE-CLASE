@@ -402,7 +402,7 @@ export const AppLayout: React.FC = () => {
          ======================================================== */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         {/* TOP HEADER */}
-        <header className="h-16 bg-white border-b border-slate-200/80 flex items-center justify-between px-3 md:px-6 shrink-0 z-30 shadow-xs">
+        <header className={`h-16 bg-white border-b border-slate-200/80 flex items-center justify-between px-3 md:px-6 shrink-0 ${notifDropdownOpen ? 'z-50' : 'z-30'} shadow-xs`}>
           {/* Left: Mobile Course Selector / Desktop Course Pill */}
           <div className="flex items-center gap-2">
             <button
