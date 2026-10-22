@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx-js-style';
+import { saveWorkbook } from './fileSaver';
 import { Student, AttendanceSession, Activity, Submission, BehaviorRecord, Course } from '../types';
 import { calculateStudentWeightedAverage } from '../utils/gradeUtils';
 import { getColombiaDateString } from '../utils/dateUtils';
@@ -273,7 +274,7 @@ export const excelService = {
 
     XLSX.utils.book_append_sheet(wb, ws, 'Estudiantes');
     const safeName = effectiveCourseName.replace(/[^a-zA-Z0-9_\-]/g, '_');
-    XLSX.writeFile(wb, `Formato_Estudiantes_${safeName}.xlsx`);
+    saveWorkbook(wb, `Formato_Estudiantes_${safeName}.xlsx`);
   },
 
   // Parsear archivo CSV o XLSX de importación
@@ -512,7 +513,7 @@ export const excelService = {
     ws['!ref'] = `A1:E${currentRow}`;
 
     XLSX.utils.book_append_sheet(wb, ws, 'Estudiantes');
-    XLSX.writeFile(wb, `AulaControl_Estudiantes_${courseName.replace(/\s+/g, '_')}.xlsx`);
+    saveWorkbook(wb, `AulaControl_Estudiantes_${courseName.replace(/\s+/g, '_')}.xlsx`);
   },
 
   /**
@@ -726,7 +727,7 @@ export const excelService = {
     ws['!ref'] = `A1:${lastColLetter}${currentRow}`;
 
     XLSX.utils.book_append_sheet(wb, ws, 'Calificaciones');
-    XLSX.writeFile(wb, `AulaControl_Calificaciones_${courseName.replace(/\s+/g, '_')}.xlsx`);
+    saveWorkbook(wb, `AulaControl_Calificaciones_${courseName.replace(/\s+/g, '_')}.xlsx`);
   },
 
   /**
@@ -834,7 +835,7 @@ export const excelService = {
     ws['!ref'] = `A1:${lastColLetter}${currentRow}`;
 
     XLSX.utils.book_append_sheet(wb, ws, 'Asistencia');
-    XLSX.writeFile(wb, `AulaControl_Asistencia_${courseName.replace(/\s+/g, '_')}.xlsx`);
+    saveWorkbook(wb, `AulaControl_Asistencia_${courseName.replace(/\s+/g, '_')}.xlsx`);
   },
 
   /**
@@ -1125,6 +1126,6 @@ export const excelService = {
     ws['!ref'] = `A1:${lastColLetter}${currentRow}`;
 
     XLSX.utils.book_append_sheet(wb, ws, 'Definitivas');
-    XLSX.writeFile(wb, `AulaControl_Notas_Definitivas_${courseName.replace(/\s+/g, '_')}.xlsx`);
+    saveWorkbook(wb, `AulaControl_Notas_Definitivas_${courseName.replace(/\s+/g, '_')}.xlsx`);
   }
 };

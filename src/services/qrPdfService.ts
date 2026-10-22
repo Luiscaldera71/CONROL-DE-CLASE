@@ -2,6 +2,7 @@ import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
 import { Student, Course } from '../types';
 import { getStudentPortalUrl } from '../utils/codeGenerator';
+import { savePdf } from './fileSaver';
 
 interface GeneratePdfOptions {
   students: Student[];
@@ -212,6 +213,6 @@ export const qrPdfService = {
     const filename = `Carnes_QR_${cleanCourseName}_Carta.pdf`;
 
     // Descargar el PDF directamente
-    doc.save(filename);
+    savePdf(doc, filename);
   }
 };

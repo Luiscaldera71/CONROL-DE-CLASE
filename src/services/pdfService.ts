@@ -2,6 +2,7 @@ import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
 import { Student } from '../types';
 import { getStudentPortalUrl } from '../utils/codeGenerator';
+import { savePdf, isNativeApp } from './fileSaver';
 
 export const pdfService = {
   /**
@@ -141,11 +142,12 @@ export const pdfService = {
     const safeCourseName = courseName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const filename = `AulaControl_QRs_${safeCourseName}.pdf`;
 
-    if (action === 'print') {
+    // En Android no hay ventana de impresión: se comparte/guarda el PDF
+    if (action === 'print' && !isNativeApp()) {
       const blobUrl = doc.output('bloburl');
       window.open(blobUrl, '_blank');
     } else {
-      doc.save(filename);
+      savePdf(doc, filename);
     }
   }
 };

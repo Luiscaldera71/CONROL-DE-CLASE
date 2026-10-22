@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { AppLogo } from '../components/ui/AppLogo';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
@@ -77,30 +78,48 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#f5f7fb] text-slate-900 flex items-center justify-center p-4 font-sans">
-      <div className="w-full max-w-md space-y-6">
-        {/* LOGO Y ENCABEZADO (Estilo AbsenSiswa) */}
+    <div className="relative min-h-screen w-full overflow-y-auto bg-gradient-to-br from-blue-700 via-blue-800 to-indigo-950 text-slate-900 flex items-center justify-center p-4 font-sans">
+      {/* FONDO DECORATIVO: resplandores, trama de puntos e íconos del aula */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+        <div className="absolute -top-32 -right-24 w-96 h-96 rounded-full bg-sky-400/25 blur-3xl" />
+        <div className="absolute top-1/3 -left-32 w-80 h-80 rounded-full bg-indigo-400/25 blur-3xl" />
+        <div className="absolute -bottom-32 right-1/4 w-96 h-96 rounded-full bg-emerald-400/15 blur-3xl" />
+        <div
+          className="absolute inset-0 opacity-[0.18]"
+          style={{
+            backgroundImage: 'radial-gradient(rgba(255,255,255,0.9) 1px, transparent 1px)',
+            backgroundSize: '26px 26px',
+            maskImage: 'radial-gradient(ellipse at center, black 30%, transparent 75%)',
+            WebkitMaskImage: 'radial-gradient(ellipse at center, black 30%, transparent 75%)'
+          }}
+        />
+        <QrCode className="absolute top-[8%] left-[8%] w-16 h-16 text-white/10 -rotate-12" />
+        <GraduationCap className="absolute top-[14%] right-[10%] w-20 h-20 text-white/10 rotate-12" />
+        <ShieldCheck className="absolute bottom-[12%] left-[12%] w-16 h-16 text-white/10 rotate-6" />
+        <Zap className="absolute bottom-[18%] right-[8%] w-14 h-14 text-white/10 -rotate-6" />
+      </div>
+
+      <div className="relative w-full max-w-md space-y-6 py-4">
+        {/* LOGO Y ENCABEZADO */}
         <div className="text-center space-y-3">
-          <div className="w-20 h-20 mx-auto rounded-3xl bg-blue-600 flex items-center justify-center shadow-xl shadow-blue-500/25">
-            <GraduationCap className="w-10 h-10 text-white" />
-          </div>
+          <AppLogo className="w-24 h-24 mx-auto drop-shadow-[0_12px_28px_rgba(15,23,42,0.45)]" />
 
           <div>
-            <h1 className="text-3xl font-black text-slate-900 tracking-tight">
+            <h1 className="text-3xl font-black text-white tracking-tight">
               AulaControl
             </h1>
-            <p className="text-xs text-blue-600 font-bold uppercase tracking-widest mt-1">
+            <p className="text-xs text-sky-200 font-bold uppercase tracking-widest mt-1">
               Control & Asistencia Docente
             </p>
           </div>
 
-          <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
+          <p className="text-xs text-blue-100/90 max-w-xs mx-auto leading-relaxed">
             Plataforma moderna para la toma de asistencia QR, control de calificaciones y seguimiento académico.
           </p>
         </div>
 
         {/* TARJETA BLANCA PULCRA CON BORDES REDONDEADOS */}
-        <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-200/90 space-y-5">
+        <div className="bg-white rounded-3xl p-6 md:p-8 shadow-2xl shadow-blue-950/40 border border-white/60 space-y-5">
           {/* TABS DE SELECCIÓN */}
           <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-2xl text-xs font-bold">
             <button
@@ -283,7 +302,7 @@ export const LoginPage: React.FC = () => {
         </div>
 
         {/* PIE DE PÁGINA */}
-        <p className="text-[11px] text-slate-400 text-center font-medium">
+        <p className="text-[11px] text-blue-200/80 text-center font-medium">
           AulaControl v2.0 • Diseñado para Alta Velocidad en Móviles y PC
         </p>
       </div>
