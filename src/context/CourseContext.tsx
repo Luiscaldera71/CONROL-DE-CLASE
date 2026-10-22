@@ -4,7 +4,7 @@ import { DEMO_COURSES, DEMO_STUDENTS, DEMO_ACTIVITIES, DEMO_SUBMISSIONS, DEMO_AT
 import { offlineStorage } from '../services/offlineStorage';
 import { generateStudentCode, cleanQRCode } from '../utils/codeGenerator';
 import { getLocalDateString, getColombiaDateString, getDayNameFromDateString } from '../utils/dateUtils';
-import { getAttendanceAccess } from '../utils/attendanceUtils';
+import { getAttendanceAccess, filterClassDaySessions } from '../utils/attendanceUtils';
 import { useAuth } from './AuthContext';
 import {
   setFirestoreDoc,
@@ -243,7 +243,11 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const activeSubmissions = submissions.filter(s => s.courseId === activeCourse?.id);
 
   // Filtrar asistencias por curso activo
-  const activeAttendanceSessions = attendanceSessions.filter(s => s.courseId === activeCourse?.id);
+  // Las sesiones en días fuera del horario del curso no se cuentan
+  const activeAttendanceSessions = filterClassDaySessions(
+    attendanceSessions.filter(s => s.courseId === activeCourse?.id),
+    activeCourse?.scheduleDays
+  );
 
   // Filtrar comportamientos por curso activo
   const activeBehaviors = behaviorRecords.filter(b => b.courseId === activeCourse?.id);

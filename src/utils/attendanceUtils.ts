@@ -1,4 +1,5 @@
 import { AttendanceSession, AttendanceStatus } from '../types';
+import { getDayNameFromDateString } from './dateUtils';
 
 /**
  * Peso con el que cada estado suma a la asistencia efectiva.
@@ -28,10 +29,23 @@ export function getAttendanceAccess(
     return { allowed: false, reason: 'No se puede tomar asistencia en fechas futuras.' };
   }
   const isClassDay = !scheduleDays || scheduleDays.length === 0 || scheduleDays.includes(dayName);
-  if (!isClassDay && !hasSession) {
+  // Los días fuera del horario no cuentan, tengan o no una lista antigua
+  if (!isClassDay) {
     return { allowed: false, reason: `Este curso no tiene clase el ${dayName}; no se puede tomar asistencia ese día.` };
   }
   return { allowed: true, reason: '' };
+}
+
+/**
+ * Descarta las sesiones registradas en días fuera del horario del curso:
+ * no se cuentan en porcentajes, notas, riesgo ni exportaciones.
+ */
+export function filterClassDaySessions(
+  sessions: AttendanceSession[],
+  scheduleDays: string[] | undefined
+): AttendanceSession[] {
+  if (!scheduleDays || scheduleDays.length === 0) return sessions;
+  return sessions.filter(s => scheduleDays.includes(getDayNameFromDateString(s.date)));
 }
 
 export interface StudentAttendanceStats {

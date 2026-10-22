@@ -32,6 +32,7 @@ import { Student, Course, Activity, Submission, AttendanceSession, BehaviorRecor
 import { cleanQRCode, playFeedbackTone, getStudentPortalUrl } from '../utils/codeGenerator';
 import { formatColombiaFullDate, getDayNameFromDateString, getColombiaDateString } from '../utils/dateUtils';
 import { calculateStudentWeightedAverage } from '../utils/gradeUtils';
+import { filterClassDaySessions } from '../utils/attendanceUtils';
 import { fetchStudentByCode, fetchStudentPortalData, StudentPortalData } from '../services/firestoreService';
 
 export const StudentPortalPage: React.FC = () => {
@@ -259,7 +260,8 @@ export const StudentPortalPage: React.FC = () => {
   const studentAttendanceHistory: { date: string; status: 'present' | 'late' | 'absent' | 'excused'; notes?: string }[] = [];
 
   if (selectedStudent) {
-    allAttendance.forEach(session => {
+    const realCourse = allCourses.find(c => c.id === selectedStudent.courseId) || remotePortalData?.course;
+    filterClassDaySessions(allAttendance, realCourse?.scheduleDays).forEach(session => {
       const rec = session.records[selectedStudent.id];
       if (rec) {
         if (rec.status === 'present') presentCount++;
